@@ -1,7 +1,8 @@
-from .svaec import SVAEC
+from .svaec import SVAEC, SVAEC_KNN
 from .vae import VAE
 from .vaec import VAEC
 
 __all__ = ['VAEC',
            'SVAEC',
-           'VAE']
+           'VAE',
+           'SVAEC_KNN']

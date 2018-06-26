@@ -16,8 +16,10 @@ def compute_log_likelihood(vae, data_loader):
             tensors = to_cuda(tensors)
         sample_batch, local_l_mean, local_l_var, batch_index, labels = tensors
         sample_batch = sample_batch.type(torch.float32)
-        reconst_loss, kl_divergence = vae(sample_batch, local_l_mean, local_l_var, batch_index=batch_index,
-                                          y=labels)
+        results = vae(sample_batch, local_l_mean, local_l_var, batch_index=batch_index,
+                      y=labels)
+
+        reconst_loss, kl_divergence = results[0], results[1]
         log_lkl += torch.sum(reconst_loss).item()
     n_samples = (len(data_loader.dataset)
                  if not (hasattr(data_loader, 'sampler') and hasattr(data_loader.sampler, 'indices')) else

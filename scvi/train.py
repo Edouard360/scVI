@@ -16,17 +16,17 @@ except NameError:
 
 
 @enable_grad()
-def train(vae, data_loader_train, data_loader_test, n_epochs=20, lr=0.001, kl=None, benchmark=False, verbose=False):
+def train(vae, data_loader_train, data_loader_test, n_epochs=20, lr=0.001, kl=None, benchmark=False, verbose=False,record_freq=10):
     # Defining the optimizer
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, vae.parameters()), lr=lr)
 
     # Getting access to the stats during training
-    stats = Stats(n_epochs=n_epochs, benchmark=benchmark, verbose=verbose)
+    stats = Stats(n_epochs=n_epochs, benchmark=benchmark, verbose=verbose, record_freq=record_freq)
     stats.callback(vae, data_loader_train, data_loader_test)
     early_stopping = EarlyStopping(benchmark=benchmark)
 
     # Training the model
-    for epoch in tqdm(range(n_epochs), desc="training"):
+    for epoch in tqdm(range(n_epochs), desc="training", disable=True):
         total_train_loss = 0
         for i_batch, (tensors_train) in enumerate(data_loader_train):
             if vae.use_cuda:
@@ -56,18 +56,62 @@ def train(vae, data_loader_train, data_loader_test, n_epochs=20, lr=0.001, kl=No
     stats.set_best_params(vae)
     return stats
 
+@enable_grad()
+def train_fully_unsupervised(vae, data_loader_train, data_loader_test, n_epochs=20, lr=0.001, kl=None, benchmark=False, verbose=False,record_freq=10, penalty_factor=1):
+    # Defining the optimizer
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, vae.parameters()), lr=lr)
+
+    # Getting access to the stats during training
+    stats = Stats(n_epochs=n_epochs, benchmark=benchmark, verbose=verbose, record_freq=record_freq)
+    stats.callback(vae, data_loader_train, data_loader_test)
+    early_stopping = EarlyStopping(benchmark=benchmark)
+    # Training the model
+    for epoch in tqdm(range(n_epochs), desc="training", disable=True):
+        total_train_loss = 0
+        for i_batch, (tensors_train) in enumerate(data_loader_train):
+            if vae.use_cuda:
+                tensors_train = to_cuda(tensors_train)
+            sample_batch_train, local_l_mean_train, local_l_var_train, batch_index_train, labels_train = tensors_train
+            sample_batch_train = sample_batch_train.type(torch.float32)
+
+            if kl is None:
+                kl_ponderation = min(1, epoch / 400.)
+            else:
+                kl_ponderation = kl
+
+            results = vae(sample_batch_train, local_l_mean_train, local_l_var_train,
+                                                          batch_index=batch_index_train, y=None)
+            reconst_loss_train, kl_divergence_train = results[0:2]
+            if len(results)==3:
+                penalty = results[2]
+
+            train_loss = torch.mean(reconst_loss_train + kl_ponderation * kl_divergence_train) + penalty_factor*penalty
+
+            batch_size = sample_batch_train.size(0)
+            total_train_loss += train_loss.item() * batch_size
+            optimizer.zero_grad()
+            train_loss.backward()
+            optimizer.step()
+
+        if not early_stopping.update(total_train_loss):
+            break
+        stats.callback(vae, data_loader_train, data_loader_test)
+    stats.display_time()
+    stats.set_best_params(vae)
+    return stats
+
 
 @enable_grad()
 def train_semi_supervised_jointly(vae, data_loader_all, data_loader_labelled, data_loader_unlabelled, n_epochs=20,
-                                  lr=0.001,
-                                  kl=None, benchmark=False, record_freq=1, classification_ratio=100):
+                                  lr=0.001,kl=None, benchmark=False, record_freq=1,
+                                  classification_ratio=100,penalty_factor=1.):
     # Defining the optimizer
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, vae.parameters()), lr=lr)
 
     # Getting access to the stats during training
     stats = Stats(n_epochs=n_epochs, benchmark=benchmark, names=["labelled", "unlabelled"], record_freq=record_freq)
     stats.callback(vae, data_loader_labelled, data_loader_unlabelled)
-    early_stopping = EarlyStopping(benchmark=benchmark)
+    #early_stopping = EarlyStopping(benchmark=benchmark)
 
     # Training the model
     for epoch in range(n_epochs):
@@ -85,8 +129,13 @@ def train_semi_supervised_jointly(vae, data_loader_all, data_loader_labelled, da
             else:
                 kl_ponderation = kl
 
-            reconst_loss, kl_divergence = vae(sample_batch, local_l_mean, local_l_var, batch_index=batch_index, y=None)
-            loss = torch.mean(reconst_loss + kl_ponderation * kl_divergence)
+            results = vae(sample_batch, local_l_mean, local_l_var, batch_index=batch_index, y=None)
+
+            reconst_loss, kl_divergence = results[0:2]
+            if len(results)==3:
+                penalty = results[2]
+
+            loss = torch.mean(reconst_loss + kl_ponderation * kl_divergence) + penalty_factor*penalty
 
             # Add a classification loss
             if hasattr(vae, "classify"):
@@ -101,8 +150,8 @@ def train_semi_supervised_jointly(vae, data_loader_all, data_loader_labelled, da
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        if not early_stopping.update(total_train_loss):
-            break
+        # if not early_stopping.update(total_train_loss):
+        #     break
         stats.callback(vae, data_loader_labelled, data_loader_unlabelled)
     stats.display_time()
     return stats
@@ -111,7 +160,7 @@ def train_semi_supervised_jointly(vae, data_loader_all, data_loader_labelled, da
 @enable_grad()
 def train_semi_supervised_alternately(vae, data_loader_all, data_loader_labelled, data_loader_unlabelled,
                                       n_epochs=20, lr=0.001, kl=None, benchmark=False, lr_classification=0.1,
-                                      record_freq=1, n_epochs_classifier=1):
+                                      record_freq=1, n_epochs_classifier=1, penalty_factor=1.):
     # Defining the optimizer
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, vae.parameters()), lr=lr)
 
@@ -136,8 +185,13 @@ def train_semi_supervised_alternately(vae, data_loader_all, data_loader_labelled
             else:
                 kl_ponderation = kl
 
-            reconst_loss, kl_divergence = vae(sample_batch, local_l_mean, local_l_var, batch_index=batch_index, y=None)
-            loss = torch.mean(reconst_loss + kl_ponderation * kl_divergence)
+            results = vae(sample_batch, local_l_mean, local_l_var, batch_index=batch_index, y=None)
+
+            reconst_loss, kl_divergence = results[0:2]
+            if len(results)==3:
+                penalty = results[2]
+
+            loss = torch.mean(reconst_loss + kl_ponderation * kl_divergence) + penalty_factor*penalty
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
