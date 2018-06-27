@@ -16,7 +16,7 @@ class SVAEC(nn.Module, SemiSupervisedModel):
     '''
 
     def __init__(self, n_input, n_labels, n_hidden=128, n_latent=10, n_layers=1, dropout_rate=0.1, n_batch=0,
-                 y_prior=None, use_cuda=False, logreg_classifier=True):
+                 y_prior=None, use_cuda=False, logreg_classifier=False):
         super(SVAEC, self).__init__()
         self.n_labels = n_labels
         self.n_input = n_input

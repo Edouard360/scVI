@@ -84,6 +84,8 @@ def train_fully_unsupervised(vae, data_loader_train, data_loader_test, n_epochs=
             reconst_loss_train, kl_divergence_train = results[0:2]
             if len(results)==3:
                 penalty = results[2]
+            else:
+                penalty = 0
 
             train_loss = torch.mean(reconst_loss_train + kl_ponderation * kl_divergence_train) + penalty_factor*penalty
 
