@@ -42,12 +42,8 @@ class GeneExpressionDataset(Dataset):
     def __getitem__(self, idx):
         return idx
 
-    def download(self):
-        GeneExpressionDataset._download(self.url, self.save_path, self.download_name)
-
     def download_and_preprocess(self):
-        if not os.path.exists(self.save_path + self.download_name):
-            self.download()
+        self.download()
         return self.preprocess()
 
     def collate_fn(self, batch):
@@ -58,9 +54,10 @@ class GeneExpressionDataset(Dataset):
             torch.LongTensor(self.batch_indices[indexes]), \
             torch.LongTensor(self.labels[indexes])
 
-    def subsample_genes(self, p_genes=1., subset_genes=None):
+    def subsample_genes(self, new_n_genes=None, subset_genes=None):
         n_cells, n_genes = self.X.shape
-        new_n_genes = int(p_genes * n_genes) if type(p_genes) is not int else p_genes
+        if subset_genes is None and (new_n_genes is None or new_n_genes >= n_genes):
+            return None  # Do nothing if subsample more genes than total number of genes
         if subset_genes is None:
             print("Downsampling from %i to %i genes" % (n_genes, new_n_genes))
             std_scaler = StandardScaler(with_mean=False)
@@ -70,7 +67,8 @@ class GeneExpressionDataset(Dataset):
             print("Downsampling from %i to %i genes" % (n_genes, len(subset_genes)))
         self.X = self.X[:, subset_genes]
         self.nb_genes = self.X.shape[1]
-        self.gene_names = self.gene_names[subset_genes]
+        if hasattr(self, 'gene_names'):
+            self.gene_names = self.gene_names[subset_genes]
 
     def subsample_cells(self, p_cells=1.):
         n_cells, n_genes = self.X.shape
@@ -85,10 +83,20 @@ class GeneExpressionDataset(Dataset):
             _subsample(a, indices) for a in (self.X, self.local_means, self.local_vars,
                                              self.batch_indices, self.labels))
 
+    def download(self):
+        if hasattr(self, 'urls') and hasattr(self, 'download_names'):
+            for url, download_name in zip(self.urls, self.download_names):
+                GeneExpressionDataset._download(url, self.save_path, download_name)
+        elif hasattr(self, 'url') and hasattr(self, 'download_name'):
+            GeneExpressionDataset._download(self.url, self.save_path, self.download_name)
+
     @staticmethod
     def _download(url, save_path, download_name):
+        if os.path.exists(save_path + download_name):
+            print("File %s already downloaded" % (save_path + download_name))
+            return
         r = urllib.request.urlopen(url)
-        print("Downloading data")
+        print("Downloading file at %s" % save_path + download_name)
 
         def readIter(f, blocksize=1000):
             """Given a file 'f', returns an iterator that returns bytes of

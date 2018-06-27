@@ -51,7 +51,7 @@ class VAE(nn.Module, BaseModel):
         x = torch.log(1 + x)
         # Here we compute as little as possible to have q(z|x)
         qz_m, qz_v, z = self.z_encoder(x)
-        if self.training:
+        if not self.training:
             z = qz_m
         return [z]
 

@@ -3,10 +3,14 @@
 
 
 """Tests for `scvi` package."""
+import numpy as np
+
 from scvi.benchmark import run_benchmarks, run_benchmarks_classification
-from scvi.models import VAEC, VAE, SVAEC
 from scvi.dataset import BrainLargeDataset, CortexDataset, SyntheticDataset, \
-    RetinaDataset, CbmcDataset, BrainSmallDataset, HematoDataset, PbmcDataset, LoomDataset
+    RetinaDataset, BrainSmallDataset, HematoDataset, LoomDataset, AnnDataset, CsvDataset, \
+    CiteSeqDataset
+from scvi.dataset.utils import concat_datasets
+from scvi.models import VAEC, VAE, SVAEC
 
 
 def test_synthetic_1():
@@ -35,9 +39,9 @@ def test_retina():
     run_benchmarks(retina_dataset, n_epochs=1, show_batch_mixing=False)
 
 
-def test_cbmc():
-    cbmc_dataset = CbmcDataset(save_path='tests/data/')
-    run_benchmarks(cbmc_dataset, n_epochs=1, show_batch_mixing=False)
+def test_cite_seq():
+    pbmc_cite_seq_dataset = CiteSeqDataset(name='pbmc', save_path='tests/data/citeSeq/')
+    run_benchmarks(pbmc_cite_seq_dataset, n_epochs=1, show_batch_mixing=False)
 
 
 def test_brain_small():
@@ -50,23 +54,38 @@ def test_hemato():
     run_benchmarks(hemato_dataset, n_epochs=1, show_batch_mixing=False)
 
 
-def test_pbmc():
-    pbmc_dataset = PbmcDataset(save_path='tests/data/PBMC/')
-    run_benchmarks(pbmc_dataset, n_epochs=1, show_batch_mixing=False)
-
-
 def test_loom():
     retina_dataset = LoomDataset("retina.loom", save_path='tests/data/')
     run_benchmarks(retina_dataset, n_epochs=1, show_batch_mixing=False)
 
 
 def test_remote_loom():
-    fish_dataset = LoomDataset("osmFISH_SScortex_mouse_all_cell.loom",  save_path='data/',
+    fish_dataset = LoomDataset("osmFISH_SScortex_mouse_all_cell.loom",
+                               save_path='data/',
                                url='http://linnarssonlab.org/osmFISH/osmFISH_SScortex_mouse_all_cells.loom')
     run_benchmarks(fish_dataset, n_epochs=10, show_batch_mixing=False)
 
 
 def test_cortex_loom():
-    cortex_dataset = LoomDataset("Cortex.loom", save_path='tests/data/',
-                                 url='http://loom.linnarssonlab.org/clone/Previously%20Published/Cortex.loom')
+    cortex_dataset = LoomDataset("Cortex.loom",
+                                 save_path='tests/data/')
     run_benchmarks(cortex_dataset, n_epochs=1, show_batch_mixing=False)
+
+
+def test_anndata():
+    ann_dataset = AnnDataset("test.h5ad", save_path='tests/data/')
+    run_benchmarks(ann_dataset, n_epochs=1, show_batch_mixing=False)
+
+
+def test_csv():
+    csv_dataet = CsvDataset("GSE100866_CBMC_8K_13AB_10X-RNA_umi.csv.gz", save_path='tests/data/', compression='gzip')
+    run_benchmarks(csv_dataet, n_epochs=1, show_batch_mixing=False)
+
+
+def test_concat_datasets():
+    cortex_dataset_1 = CortexDataset()
+    cortex_dataset_1.subsample_genes(subset_genes=np.arange(0, 300))
+    cortex_dataset_2 = CortexDataset()
+    cortex_dataset_2.subsample_genes(subset_genes=np.arange(100, 400))
+    cortex_dataset_merged = concat_datasets(cortex_dataset_1, cortex_dataset_2)
+    print("Final nb. genes : ", cortex_dataset_merged.nb_genes)
