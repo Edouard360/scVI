@@ -16,17 +16,18 @@ except NameError:
 
 
 @enable_grad()
-def train(vae, data_loader_train, data_loader_test, n_epochs=20, lr=0.001, kl=None, benchmark=False, verbose=False):
+def train(vae, data_loader_train, data_loader_test, n_epochs=20, lr=0.001, kl=None, benchmark=False, verbose=False,
+          record_freq=10):
     # Defining the optimizer
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, vae.parameters()), lr=lr)
 
     # Getting access to the stats during training
-    stats = Stats(n_epochs=n_epochs, benchmark=benchmark, verbose=verbose)
+    stats = Stats(n_epochs=n_epochs, benchmark=benchmark, verbose=verbose, record_freq=record_freq)
     stats.callback(vae, data_loader_train, data_loader_test)
-    early_stopping = EarlyStopping(benchmark=benchmark)
+    early_stopping = EarlyStopping(benchmark=benchmark, patience=10000)
 
     # Training the model
-    for epoch in tqdm(range(n_epochs), desc="training"):
+    for epoch in tqdm(range(n_epochs), desc="training", disable=verbose):
         total_train_loss = 0
         for i_batch, (tensors_train) in enumerate(data_loader_train):
             if vae.use_cuda:
@@ -183,4 +184,48 @@ def train_classifier(vae, classifier, *data_loaders, n_epochs=250, lr=0.1, bench
 
         stats.callback(vae, *data_loaders, classifier=classifier)
 
+    return stats
+
+
+@enable_grad()
+def train_fully_unsupervised(vae, data_loader_train, data_loader_test, n_epochs=20, lr=0.001, kl=None, benchmark=False,
+                             verbose=False, record_freq=10):  # additional_term=0
+    # Defining the optimizer
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, vae.parameters()), lr=lr)
+
+    # Getting access to the stats during training
+    stats = Stats(n_epochs=n_epochs, benchmark=benchmark, verbose=verbose, record_freq=record_freq)
+    stats.callback(vae, data_loader_train, data_loader_test)
+    # Training the model
+    for epoch in tqdm(range(n_epochs), desc="training", disable=True):
+        total_train_loss = 0
+        for i_batch, (tensors_train) in enumerate(data_loader_train):
+            if vae.use_cuda:
+                tensors_train = to_cuda(tensors_train)
+            sample_batch_train, local_l_mean_train, local_l_var_train, batch_index_train, labels_train = tensors_train
+            sample_batch_train = sample_batch_train.type(torch.float32)
+
+            if kl is None:
+                kl_ponderation = min(1, epoch / 400.)
+            else:
+                kl_ponderation = kl
+
+            reconst_loss_train, kl_divergence_train = vae(sample_batch_train, local_l_mean_train, local_l_var_train,
+                                                          batch_index=batch_index_train, y=None)
+
+            train_loss = torch.mean(reconst_loss_train + kl_ponderation * kl_divergence_train)
+
+            # if hasattr(vae, "mutual_information_probs") and additional_term!=0:
+            #     log_probs = vae.mutual_information_probs(sample_batch_train, local_l_mean_train)
+            #     train_loss -= additional_term*torch.mean(log_probs)
+
+            batch_size = sample_batch_train.size(0)
+            total_train_loss += train_loss.item() * batch_size
+            optimizer.zero_grad()
+            train_loss.backward()
+            optimizer.step()
+
+        stats.callback(vae, data_loader_train, data_loader_test)
+    stats.display_time()
+    stats.set_best_params(vae)
     return stats

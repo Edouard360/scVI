@@ -1,8 +1,10 @@
 import collections
 
 import torch
+import torch.nn.functional as F
 from torch import nn as nn
 from torch.distributions import Normal
+from torch.nn import Linear
 
 from scvi.models.utils import one_hot
 
@@ -17,48 +19,60 @@ class FCLayers(nn.Module):
         return self.fc_layers(x)
 
     @staticmethod
-    def create(n_in, n_out, n_cat=0, n_hidden=128, n_layers=1, dropout_rate=0.1):
+    def create(n_in, n_out, n_cat=0, n_hidden=128, n_layers=1, dropout_rate=0.1, n_mult=10, n_channels=None, scale=1):
+        if n_channels is not None:
+            return FCLinearOneHot(n_in, n_out, n_channels, n_hidden=n_hidden, n_layers=n_layers,
+                                  dropout_rate=dropout_rate)
         if type(n_cat) is int:
             if n_cat == 0:
                 return FCLayers(n_in, n_out, n_hidden=n_hidden, n_layers=n_layers, dropout_rate=dropout_rate)
             else:
                 return OneHotFCLayers(n_in, n_out, n_cat=n_cat, n_hidden=n_hidden, n_layers=n_layers,
-                                      dropout_rate=dropout_rate)
+                                      dropout_rate=dropout_rate, n_mult=n_mult)
         elif type(n_cat) is list:
             return ManyOneHotFCLayers(n_in, n_out, n_cat_list=n_cat,
-                                      n_hidden=n_hidden, n_layers=n_layers, dropout_rate=dropout_rate)
+                                      n_hidden=n_hidden, n_layers=n_layers, dropout_rate=dropout_rate, n_mult=n_mult,
+                                      scale=scale)
 
     @staticmethod
-    def _sequential(layers_dim, n_cat=0, dropout_rate=0.1):
+    def _sequential(layers_dim, n_cat=0, dropout_rate=0.1, n_mult=1, n_batch=None):
         return nn.Sequential(collections.OrderedDict(
             [('Layer {}'.format(i), nn.Sequential(
                 nn.Dropout(p=dropout_rate),
-                nn.Linear(n_in + n_cat, n_out),
+                nn.Linear(n_in + n_mult * n_cat, n_out) if n_batch is None else LinearOneHot(n_in, n_out, n_batch),
                 nn.BatchNorm1d(n_out, eps=1e-3, momentum=0.99),
                 nn.ReLU())) for i, (n_in, n_out) in enumerate(zip(layers_dim[:-1], layers_dim[1:]))]))
 
 
 class OneHotFCLayers(nn.Module):
-    def __init__(self, n_in, n_out, n_cat, n_hidden=128, n_layers=1, dropout_rate=0.1):
+    def __init__(self, n_in, n_out, n_cat, n_hidden=128, n_layers=1, dropout_rate=0.1, n_mult=10, scale=1):
         super(OneHotFCLayers, self).__init__()
+        print("Initialized One Hot with ", n_cat)
         layers_dim = [n_in] + (n_layers - 1) * [n_hidden] + [n_out]
         self.n_cat = n_cat
-        self.fc_layers = FCLayers._sequential(layers_dim, n_cat=n_cat, dropout_rate=dropout_rate)
+        self.n_mult = n_mult
+        self.scale = scale
+        self.fc_layers = FCLayers._sequential(layers_dim, n_cat=n_cat, dropout_rate=dropout_rate, n_mult=n_mult)
 
     def forward(self, x, o, *os):
         if o.size(1) != self.n_cat:
             o = one_hot(o, self.n_cat)
+        if self.n_mult != 0:
+            o = o.repeat(1, self.n_mult) * self.scale
         for layer in self.fc_layers:
             x = layer(torch.cat((x, o), 1))
         return x
 
 
 class ManyOneHotFCLayers(nn.Module):
-    def __init__(self, n_in, n_out, n_cat_list, n_hidden=128, n_layers=1, dropout_rate=0.1):
+    def __init__(self, n_in, n_out, n_cat_list, n_hidden=128, n_layers=1, dropout_rate=0.1, n_mult=10, scale=1):
         super(ManyOneHotFCLayers, self).__init__()
         layers_dim = [n_in] + (n_layers - 1) * [n_hidden] + [n_out]
         self.n_cat_list = n_cat_list
-        self.fc_layers = FCLayers._sequential(layers_dim, n_cat=sum(n_cat_list), dropout_rate=dropout_rate)
+        self.n_mult = n_mult
+        self.scale = scale
+        self.fc_layers = FCLayers._sequential(layers_dim, n_cat=sum(n_cat_list), dropout_rate=dropout_rate,
+                                              n_mult=n_mult)
 
     def forward(self, x, *os):
         one_hot_os = []
@@ -66,9 +80,9 @@ class ManyOneHotFCLayers(nn.Module):
             if o is not None and self.n_cat_list[i]:
                 one_hot_o = o
                 if o.size(1) != self.n_cat_list[i]:
-                    one_hot_o = one_hot(o, self.n_cat_list[i])
+                    one_hot_o = one_hot(o, self.n_cat_list[i]).repeat(1, self.n_mult) * self.scale
                 elif o.size(1) == 1 and self.n_cat_list[i] == 1:
-                    one_hot_o = o.type(torch.float32)
+                    one_hot_o = o.type(torch.float32) * self.scale
                 one_hot_os += [one_hot_o]
         for layer in self.fc_layers:
             x = layer(torch.cat((x,) + tuple(one_hot_os), 1))
@@ -77,10 +91,10 @@ class ManyOneHotFCLayers(nn.Module):
 
 # Encoder
 class Encoder(nn.Module):
-    def __init__(self, n_input, n_hidden=128, n_latent=10, n_cat=0, n_layers=1, dropout_rate=0.1):
+    def __init__(self, n_input, n_hidden=128, n_latent=10, n_cat=0, n_layers=1, dropout_rate=0.1, n_channels=None):
         super(Encoder, self).__init__()
         self.encoder = FCLayers.create(n_in=n_input, n_out=n_hidden, n_cat=n_cat, n_layers=n_layers, n_hidden=n_hidden,
-                                       dropout_rate=dropout_rate)
+                                       dropout_rate=dropout_rate, n_channels=n_channels)
         self.mean_encoder = nn.Linear(n_hidden, n_latent)
         self.var_encoder = nn.Linear(n_hidden, n_latent)
 
@@ -98,11 +112,13 @@ class Encoder(nn.Module):
 
 # Decoder
 class DecoderSCVI(nn.Module):
-    def __init__(self, n_latent, n_input, n_hidden=128, n_layers=1, dropout_rate=0.1, n_batch=0, n_labels=0):
+    def __init__(self, n_latent, n_input, n_hidden=128, n_layers=1, dropout_rate=0.1, n_batch=0, n_labels=0,
+                 n_channels=None, n_mult=1, scale=1):
         super(DecoderSCVI, self).__init__()
         self.n_batch = n_batch
         self.px_decoder = FCLayers.create(n_in=n_latent, n_out=n_hidden, n_layers=n_layers, n_hidden=n_hidden,
-                                          dropout_rate=dropout_rate, n_cat=[n_batch, n_labels])
+                                          dropout_rate=dropout_rate, n_cat=[n_batch, n_labels], n_channels=n_channels,
+                                          n_mult=n_mult, scale=scale)
 
         # mean gamma
         self.px_scale_decoder = nn.Sequential(nn.Linear(n_hidden, n_input), nn.Softmax(dim=-1))
@@ -129,10 +145,10 @@ class DecoderSCVI(nn.Module):
 
 # Decoder
 class Decoder(nn.Module):
-    def __init__(self, n_latent, n_output, n_cat=0, n_hidden=128, n_layers=1, dropout_rate=0.1):
+    def __init__(self, n_latent, n_output, n_cat=0, n_hidden=128, n_layers=1, dropout_rate=0.1, n_mult=1):
         super(Decoder, self).__init__()
         self.decoder = FCLayers.create(n_in=n_latent, n_out=n_hidden, n_cat=n_cat, n_layers=n_layers,
-                                       n_hidden=n_hidden, dropout_rate=dropout_rate)
+                                       n_hidden=n_hidden, dropout_rate=dropout_rate, n_mult=n_mult)
 
         self.mean_decoder = nn.Linear(n_hidden, n_output)
         self.var_decoder = nn.Linear(n_hidden, n_output)
@@ -143,3 +159,87 @@ class Decoder(nn.Module):
         p_m = self.mean_decoder(p)
         p_v = torch.exp(self.var_decoder(p))
         return p_m, p_v
+
+
+class LadderEncoder(Encoder):
+    def forward(self, x, o=None):
+        q = self.encoder(x, o)
+        q_m = self.mean_encoder(q)
+        q_v = torch.exp(torch.clamp(self.var_encoder(q), -5, 5))
+        latent = self.reparameterize(q_m, q_v)
+        return (q_m, q_v, latent), q
+
+
+class LadderDecoder(Decoder):
+    def reparameterize(self, mu, var):
+        return Normal(mu, var.sqrt()).rsample()
+
+    def forward(self, x, q_m_hat, q_v_hat, o=None):
+        p = self.decoder(x, o)
+        p_m = self.mean_decoder(p)
+        p_v = torch.exp(torch.clamp(self.var_decoder(p), -5, 5))
+
+        pr1, pr2 = (1 / q_v_hat, 1 / p_v)
+
+        q_m = ((q_m_hat * pr1) + (p_m * pr2)) / (pr1 + pr2)
+        q_v = 1 / (pr1 + pr2)
+
+        latent = self.reparameterize(q_m, q_v)
+        return (q_m, q_v, latent), (p_m, p_v)
+
+
+class ListModule(nn.Module):
+    def __init__(self, *args):
+        super(ListModule, self).__init__()
+        idx = 0
+        for module in args:
+            self.add_module(str(idx), module)
+            idx += 1
+
+    def __getitem__(self, idx):
+        if idx < 0 or idx >= len(self._modules):
+            raise IndexError('index {} is out of range'.format(idx))
+        it = iter(self._modules.values())
+        for i in range(idx):
+            next(it)
+        return next(it)
+
+    def __iter__(self):
+        return iter(self._modules.values())
+
+    def __len__(self):
+        return len(self._modules)
+
+
+class LinearOneHot(Linear):
+    def __init__(self, in_features, out_features, n_batch, bias=True):
+        super(Linear, self).__init__()
+        self.n_batch = n_batch
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features, n_batch))
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(out_features, n_batch))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def forward(self, input, batch_index, y=None):
+        batch_index = batch_index.view(-1)
+        result = torch.zeros(input.size(0), self.out_features, dtype=input.dtype, device=input.device)
+        for b in range(self.n_batch):
+            result[batch_index == b] = F.linear(input[batch_index == b], self.weight[:, :, b], self.bias[:, b])
+        return result
+
+
+class FCLinearOneHot(nn.Module):
+    def __init__(self, n_in, n_out, n_batch, n_hidden=128, n_layers=1, dropout_rate=0.1):
+        super(FCLinearOneHot, self).__init__()
+        layers_dim = [n_in] + (n_layers - 1) * [n_hidden] + [n_out]
+        self.fc_layers = FCLayers._sequential(layers_dim, n_cat=0, dropout_rate=dropout_rate, n_batch=n_batch)
+
+    def forward(self, x, batch_index):
+        for layers in self.fc_layers:
+            for layer in layers:
+                x = layer(x, batch_index) if isinstance(layer, LinearOneHot) else layer(x)
+        return x

@@ -16,7 +16,7 @@ class SVAEC(nn.Module, SemiSupervisedModel):
     '''
 
     def __init__(self, n_input, n_labels, n_hidden=128, n_latent=10, n_layers=1, dropout_rate=0.1, n_batch=0,
-                 y_prior=None, use_cuda=False, logreg_classifier=True):
+                 y_prior=None, use_cuda=False, logreg_classifier=True, n_mult=1, z2_z1_edge=True):
         super(SVAEC, self).__init__()
         self.n_labels = n_labels
         self.n_input = n_input
@@ -30,7 +30,7 @@ class SVAEC(nn.Module, SemiSupervisedModel):
         self.l_encoder = Encoder(n_input, n_hidden=n_hidden, n_latent=1, n_layers=1,
                                  dropout_rate=dropout_rate)
         self.decoder = DecoderSCVI(n_latent, n_input, n_hidden=n_hidden, n_layers=n_layers,
-                                   dropout_rate=dropout_rate, n_batch=n_batch)
+                                   dropout_rate=dropout_rate, n_batch=n_batch, n_mult=n_mult)
 
         self.dispersion = 'gene'
         self.px_r = torch.nn.Parameter(torch.randn(n_input, ))
@@ -41,8 +41,9 @@ class SVAEC(nn.Module, SemiSupervisedModel):
         else:
             self.classifier = Classifier(n_latent, n_hidden, self.n_labels, n_layers, dropout_rate)
 
-        self.encoder_z2_z1 = Encoder(n_input=n_latent, n_cat=self.n_labels, n_latent=n_latent, n_layers=n_layers)
-        self.decoder_z1_z2 = Decoder(n_latent, n_latent, n_cat=self.n_labels, n_layers=n_layers)
+        self.encoder_z2_z1 = Encoder(n_input=n_latent, n_cat=self.n_labels * z2_z1_edge, n_latent=n_latent,
+                                     n_layers=n_layers)
+        self.decoder_z1_z2 = Decoder(n_latent, n_latent, n_cat=self.n_labels, n_layers=n_layers, n_mult=n_mult)
 
         self.use_cuda = use_cuda and torch.cuda.is_available()
         if self.use_cuda:
@@ -122,6 +123,6 @@ class SVAEC(nn.Module, SemiSupervisedModel):
         reconst_loss += (loss_z1_weight + ((loss_z1_unweight).view(self.n_labels, -1).t() * probs).sum(dim=1))
 
         kl_divergence = (kl_divergence_z2.view(self.n_labels, -1).t() * probs).sum(dim=1)
-        kl_divergence += kl(Multinomial(probs=probs), Multinomial(probs=self.y_prior))
+        kl_divergence += kl_divergence_l
 
-        return reconst_loss, kl_divergence
+        return reconst_loss + kl(Multinomial(probs=probs), Multinomial(probs=self.y_prior)), kl_divergence
