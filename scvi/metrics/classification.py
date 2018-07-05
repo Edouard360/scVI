@@ -5,21 +5,22 @@ import torch
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GridSearchCV
 from sklearn.svm import SVC
+from sklearn.utils.linear_assignment_ import linear_assignment
 
 from scvi.utils import no_grad, eval_modules, to_cuda
 
 Accuracy = namedtuple('Accuracy', ['unweighted', 'weighted', 'worst', 'accuracy_classes'])
 
 
-def compute_accuracy_tuple(y, labels):
-    labels = labels.ravel()
-    n_labels = len(np.unique(labels))
+def compute_accuracy_tuple(y_pred, y):
+    y = y.ravel()
+    n_labels = len(np.unique(y))
     classes_probabilities = []
     accuracy_classes = []
     for cl in range(n_labels):
-        idx = labels == cl
+        idx = y == cl
         classes_probabilities += [np.mean(idx)]
-        accuracy_classes += [np.mean((labels[idx] == y[idx])) if classes_probabilities[-1] else 0]
+        accuracy_classes += [np.mean((y[idx] == y_pred[idx])) if classes_probabilities[-1] else 0]
         # This is also referred to as the "recall": p = n_true_positive / (n_false_negative + n_true_positive)
         # ( We could also compute the "precision": p = n_true_positive / (n_false_positive + n_true_positive) )
         accuracy_named_tuple = Accuracy(
@@ -34,14 +35,14 @@ def compute_accuracy_tuple(y, labels):
 @eval_modules()
 def compute_accuracy(vae, data_loader, classifier=None):
     all_y_pred = []
-    all_labels = []
+    all_y = []
 
     for i_batch, tensors in enumerate(data_loader):
         if vae.use_cuda:
             tensors = to_cuda(tensors)
         sample_batch, _, _, _, labels = tensors
         sample_batch = sample_batch.type(torch.float32)
-        all_labels += [labels.view(-1)]
+        all_y += [labels.view(-1)]
 
         if classifier is not None:
             # Then we use the specified classifier
@@ -52,9 +53,24 @@ def compute_accuracy(vae, data_loader, classifier=None):
             y_pred = vae.classify(sample_batch).argmax(dim=-1)
         all_y_pred += [y_pred]
 
-    accuracy = (torch.cat(all_y_pred) == torch.cat(all_labels)).type(torch.float32).mean().item()
+    all_y_pred = np.array(torch.cat(all_y_pred))  # .data.numpy()
+    all_y = np.array(torch.cat(all_y))  # .data.numpy()
+    unsupervised_accuracy = unsupervised_clustering_accuracy(all_y_pred, all_y)
+    return unsupervised_accuracy[0]  # accuracy
 
-    return accuracy
+
+def unsupervised_clustering_accuracy(y_pred, y):
+    """
+    Unsupervised Clustering Accuracy
+    """
+    assert len(y_pred) == len(y)
+    n_clusters = len(np.unique(y))
+    reward_matrix = np.zeros((n_clusters, n_clusters), dtype=np.int64)
+    for y_pred_, y_ in zip(y_pred, y):
+        reward_matrix[y_pred_, y_] += 1
+    cost_matrix = reward_matrix.max() - reward_matrix
+    ind = linear_assignment(cost_matrix)
+    return sum([reward_matrix[i, j] for i, j in ind]) * 1.0 / y_pred.size, ind
 
 
 def compute_accuracy_svc(data_train, labels_train, data_test, labels_test, unit_test=False, verbose=0):
