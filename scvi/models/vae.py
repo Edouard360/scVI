@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch.distributions import Normal, kl_divergence as kl
 
 from scvi.metrics.log_likelihood import log_zinb_positive, log_nb_positive
+from scvi.models.mmd import mmd_objective
 from scvi.models.modules import Encoder, DecoderSCVI
 from scvi.models.utils import one_hot
 from .base import BaseModel
@@ -17,7 +18,7 @@ torch.backends.cudnn.benchmark = True
 # VAE model
 class VAE(nn.Module, BaseModel):
     def __init__(self, n_input, n_hidden=128, n_latent=10, n_layers=1, dropout_rate=0.1, dispersion="gene",
-                 log_variational=True, reconstruction_loss="zinb", n_batch=0, n_labels=0, use_cuda=False):
+                 log_variational=True, reconstruction_loss="zinb", n_batch=0, n_labels=0, use_cuda=False, n_mult=1):
         super(VAE, self).__init__()
         self.dispersion = dispersion
         self.log_variational = log_variational
@@ -41,7 +42,7 @@ class VAE(nn.Module, BaseModel):
         self.l_encoder = Encoder(n_input, n_hidden=n_hidden, n_latent=1, n_layers=1,
                                  dropout_rate=dropout_rate)
         self.decoder = DecoderSCVI(n_latent, n_input, n_hidden=n_hidden, n_layers=n_layers,
-                                   dropout_rate=dropout_rate, n_batch=n_batch)
+                                   dropout_rate=dropout_rate, n_batch=n_batch, n_mult=n_mult)
 
         self.use_cuda = use_cuda and torch.cuda.is_available()
         if self.use_cuda:
