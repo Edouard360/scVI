@@ -19,7 +19,13 @@ class FCLayers(nn.Module):
         return self.fc_layers(x)
 
     @staticmethod
-    def create(n_in, n_out, n_cat=0, n_hidden=128, n_layers=1, dropout_rate=0.1, n_mult=10, n_channels=None, scale=1):
+    def create(n_in, n_out, n_cat=0, n_hidden=128, n_layers=1, dropout_rate=0.1, n_mult=10, n_channels=None, scale=1, doubly_linear=False, strange=False):
+        if strange:
+            return FCStrangeLinear(n_in, n_out, sum(n_cat), n_hidden=n_hidden, n_layers=n_layers,
+                                  dropout_rate=dropout_rate)
+        if doubly_linear:
+            return FCDoublyLinear(n_in, n_out, sum(n_cat), n_hidden=n_hidden, n_layers=n_layers,
+                                  dropout_rate=dropout_rate)
         if n_channels is not None:
             return FCLinearOneHot(n_in, n_out, n_channels, n_hidden=n_hidden, n_layers=n_layers,
                                   dropout_rate=dropout_rate)
@@ -35,11 +41,26 @@ class FCLayers(nn.Module):
                                       scale=scale)
 
     @staticmethod
-    def _sequential(layers_dim, n_cat=0, dropout_rate=0.1, n_mult=1, n_batch=None):
+    def _sequential(layers_dim, n_cat=0, dropout_rate=0.1, n_mult=1, n_batch=None, doubly_linear=False):
+        def linear(n_in, n_mult, n_cat, n_out):
+            if n_batch is None:
+                layer = nn.Linear(n_in + n_mult * n_cat, n_out)
+            else:
+                if not doubly_linear:
+                    layer = LinearOneHot(n_in, n_out, n_batch)
+                else:
+                    layer = DoublyLinear(n_in, n_out, n_batch)
+            return layer
+
+        # dropout_rates = [dropout_rate]*len(layers_dim[:-1])
+        # if layers_dim[0]==10:
+        #     dropout_rates[0] = 0
+        # print("DROPOUT RATES ",dropout_rates)
+
         return nn.Sequential(collections.OrderedDict(
             [('Layer {}'.format(i), nn.Sequential(
                 nn.Dropout(p=dropout_rate),
-                nn.Linear(n_in + n_mult * n_cat, n_out) if n_batch is None else LinearOneHot(n_in, n_out, n_batch),
+                linear(n_in, n_mult, n_cat, n_out),
                 nn.BatchNorm1d(n_out, eps=1e-3, momentum=0.99),
                 nn.ReLU())) for i, (n_in, n_out) in enumerate(zip(layers_dim[:-1], layers_dim[1:]))]))
 
@@ -113,12 +134,12 @@ class Encoder(nn.Module):
 # Decoder
 class DecoderSCVI(nn.Module):
     def __init__(self, n_latent, n_input, n_hidden=128, n_layers=1, dropout_rate=0.1, n_batch=0, n_labels=0,
-                 n_channels=None, n_mult=1, scale=1):
+                 n_channels=None, n_mult=1, scale=1, doubly_linear=False, strange=True):
         super(DecoderSCVI, self).__init__()
         self.n_batch = n_batch
         self.px_decoder = FCLayers.create(n_in=n_latent, n_out=n_hidden, n_layers=n_layers, n_hidden=n_hidden,
                                           dropout_rate=dropout_rate, n_cat=[n_batch, n_labels], n_channels=n_channels,
-                                          n_mult=n_mult, scale=scale)
+                                          n_mult=n_mult, scale=scale, doubly_linear=doubly_linear, strange=strange)
 
         # mean gamma
         self.px_scale_decoder = nn.Sequential(nn.Linear(n_hidden, n_input), nn.Softmax(dim=-1))
@@ -213,7 +234,7 @@ class ListModule(nn.Module):
 
 class LinearOneHot(Linear):
     def __init__(self, in_features, out_features, n_batch, bias=True):
-        super(Linear, self).__init__()
+        super(LinearOneHot, self).__init__()
         self.n_batch = n_batch
         self.in_features = in_features
         self.out_features = out_features
@@ -230,6 +251,48 @@ class LinearOneHot(Linear):
         for b in range(self.n_batch):
             result[batch_index == b] = F.linear(input[batch_index == b], self.weight[:, :, b], self.bias[:, b])
         return result
+
+
+class DoublyLinear(nn.Module):
+    def __init__(self, n_in, n_out, n_batch):
+        super(DoublyLinear, self).__init__()
+        self.linear_latent = nn.Linear(n_in, n_out)
+        self.linear_onehot = nn.Linear(n_batch, n_out)
+        self.n_batch = n_batch
+
+    def forward(self, input, batch_index, y=None):
+        return (
+            F.linear(input, self.linear_latent.weight) +
+            F.linear(one_hot(batch_index, self.n_batch), self.linear_onehot.weight) +
+            self.linear_onehot.bias + self.linear_latent.bias
+        )
+
+
+class FCStrangeLinear(nn.Module):
+    def __init__(self, n_in, n_out, n_batch, n_hidden=128, n_layers=1, dropout_rate=0.1):
+        super(FCStrangeLinear, self).__init__()
+        layers_dim = [n_in] + (n_layers - 1) * [n_hidden] + [n_out]
+        self.n_batch = n_batch
+        self.fc_layers = FCLayers._sequential(layers_dim, n_cat=n_batch, dropout_rate=dropout_rate, n_batch=None,
+                                              doubly_linear=False)
+
+    def forward(self, x, batch_index, y=None):
+        for layers in self.fc_layers:
+            for layer in layers:
+                x = layer(torch.cat((x,one_hot(batch_index, self.n_batch)),1)) if isinstance(layer, nn.Linear) else layer(x)
+        return x
+
+class FCDoublyLinear(nn.Module):
+    def __init__(self, n_in, n_out, n_batch, n_hidden=128, n_layers=1, dropout_rate=0.1):
+        super(FCDoublyLinear, self).__init__()
+        layers_dim = [n_in] + (n_layers - 1) * [n_hidden] + [n_out]
+        self.fc_layers = FCLayers._sequential(layers_dim, n_cat=0, dropout_rate=dropout_rate, n_batch=n_batch)
+
+    def forward(self, x, batch_index, y=None):
+        for layers in self.fc_layers:
+            for layer in layers:
+                x = layer(x, batch_index) if isinstance(layer, DoublyLinear) else layer(x)
+        return x
 
 
 class FCLinearOneHot(nn.Module):

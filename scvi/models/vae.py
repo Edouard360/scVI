@@ -18,7 +18,7 @@ torch.backends.cudnn.benchmark = True
 # VAE model
 class VAE(nn.Module, BaseModel):
     def __init__(self, n_input, n_hidden=128, n_latent=10, n_layers=1, dropout_rate=0.1, dispersion="gene",
-                 log_variational=True, reconstruction_loss="zinb", n_batch=0, n_labels=0, use_cuda=False, n_mult=1):
+                 log_variational=True, reconstruction_loss="zinb", n_batch=0, n_labels=0, use_cuda=False, n_mult=1, doubly_linear=False, strange=True):
         super(VAE, self).__init__()
         self.dispersion = dispersion
         self.log_variational = log_variational
@@ -42,8 +42,10 @@ class VAE(nn.Module, BaseModel):
         self.l_encoder = Encoder(n_input, n_hidden=n_hidden, n_latent=1, n_layers=1,
                                  dropout_rate=dropout_rate)
         self.decoder = DecoderSCVI(n_latent, n_input, n_hidden=n_hidden, n_layers=n_layers,
-                                   dropout_rate=dropout_rate, n_batch=n_batch, n_mult=n_mult)
+                                   dropout_rate=dropout_rate, n_batch=n_batch, n_mult=n_mult, doubly_linear=doubly_linear, strange=strange)#, n_channels=n_batch)
 
+        #self.good_params = [param   for seq in self.decoder.px_decoder.fc_layers for param in seq[1].linear_onehot.parameters()]
+        #print(list(params[0]))
         self.use_cuda = use_cuda and torch.cuda.is_available()
         if self.use_cuda:
             self.cuda()
