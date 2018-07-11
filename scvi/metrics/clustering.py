@@ -4,15 +4,21 @@ import torch
 from scvi.utils import to_cuda, no_grad, eval_modules
 
 
+@eval_modules()
+def get_latent_mean(vae, data_loader, use_cuda=True):
+    return get_latent(vae, data_loader, use_cuda=use_cuda)
+
+get_latent = get_latent_mean
+
 @no_grad()
-def get_latents(vae, data_loader):
+@eval_modules()
+def get_latents(vae, data_loader, use_cuda=True):
     latents = [[]] * vae.n_latent_layers
     batch_indices = []
     labels = []
-    for tensorlist in data_loader:
-        if vae.use_cuda:
-            tensorlist = to_cuda(tensorlist)
-        sample_batch, local_l_mean, local_l_var, batch_index, label = tensorlist
+    for tensors in data_loader:
+        tensors = to_cuda(tensors, use_cuda=use_cuda)
+        sample_batch, local_l_mean, local_l_var, batch_index, label = tensors
         sample_batch = sample_batch.type(torch.float32)
         latents_ = vae.get_latents(sample_batch, label)
         latents = [l + [l_] for l, l_ in zip(latents, latents_)]
@@ -26,14 +32,13 @@ def get_latents(vae, data_loader):
 
 
 @no_grad()
-def get_latents_with_predictions(vae, data_loader):
+def get_latents_with_predictions(vae, data_loader, use_cuda=True):
     latents = [[]] * vae.n_latent_layers
     batch_indices = []
     predictions = []
     labels = []
     for tensorlist in data_loader:
-        if vae.use_cuda:
-            tensorlist = to_cuda(tensorlist)
+        tensorlist = to_cuda(tensorlist, use_cuda=use_cuda)
         sample_batch, local_l_mean, local_l_var, batch_index, label = tensorlist
         sample_batch = sample_batch.type(torch.float32)
         latents_ = vae.get_latents(sample_batch, label)
@@ -49,14 +54,7 @@ def get_latents_with_predictions(vae, data_loader):
     return latents, batch_indices, labels, predictions
 
 
-@eval_modules()
-def get_latent_mean(vae, data_loader):
-    return get_latent(vae, data_loader)
 
-
-def get_latent(vae, data_loader):
-    latents, batch_indices, labels = get_latents(vae, data_loader)
-    return latents[0], batch_indices, labels
 
 
 # CLUSTERING METRICS
