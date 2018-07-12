@@ -110,3 +110,11 @@ ENV/
 # Floobits
 .floo
 .flooignore
+
+# Personal
+tests/data/
+single-cell-3prime-paper/
+examples/experiments/
+examples/help/
+data
+run_main.py
