@@ -55,7 +55,10 @@ class JointSemiSupervisedVariationalInference(SemiSupervisedVariationalInference
 
     def loss(self, tensors_all, tensors_labelled):
         loss = super(JointSemiSupervisedVariationalInference, self).loss(tensors_all)
-        sample_batch, _, _, _, y = tensors_labelled
+        sample_batch, _, _, batch_index, y = tensors_labelled
         classification_loss = F.cross_entropy(self.model.classify(sample_batch), y.view(-1))
         loss += classification_loss * self.classification_ratio
+        # sample_batch_z = self.model.sample_from_posterior_z(sample_batch)
+        # loss_mmd = mmd_objective(sample_batch_z, batch_index, self.gene_dataset.n_batches)
+        # print(loss_mmd.requires_grad) # + loss_mmd
         return loss

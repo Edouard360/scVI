@@ -1,52 +1,37 @@
 # -*- coding: utf-8 -*-
 """Main module."""
 import copy
+import math
 
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from sklearn.mixture import GaussianMixture
 from torch.distributions import Multinomial, kl_divergence as kl
 from torch.distributions import Normal
 
-from scvi.metrics.clustering import get_latent_mean
-from scvi.metrics.log_likelihood import log_zinb_positive
-
-torch.backends.cudnn.benchmark = True
+from scvi.metrics.clustering import get_latents
 from scvi.models.vae import VAE
-import torch
-import torch.nn as nn
-from sklearn.mixture import GaussianMixture
-import math
-import torch.nn.functional as F
 
 
 # VAE model
 class VADE(VAE):
-    def __init__(self, n_input, n_hidden=128, n_latent=10, n_layers=1, dropout_rate=0.1, dispersion="gene",
-                 log_variational=True, reconstruction_loss="zinb", n_batch=0, n_labels=0, use_cuda=False):
-        super(VADE, self).__init__(n_input, n_batch=n_batch, n_labels=n_labels, use_cuda=use_cuda,
-                                   dispersion=dispersion, reconstruction_loss=reconstruction_loss,
-                                   log_variational=log_variational)
-        self.n_latent = n_latent
-        self.dispersion = dispersion
-        self.log_variational = log_variational
-        self.reconstruction_loss = reconstruction_loss
-
-        # Automatically desactivate if useless
-        self.n_batch = 0 if n_batch == 1 else n_batch
-        self.n_labels = n_labels
-
-        # First mistake in Max's y_prior is not trainable
-        self.y_prior = (1 / self.n_labels) * torch.ones(self.n_labels)
-
-        self.use_cuda = use_cuda and torch.cuda.is_available()
+    def __init__(self, n_input, n_labels, n_hidden=128, n_latent=10, n_layers=1, dropout_rate=0.1, n_batch=0,
+                 y_prior=None, dispersion="gene", log_variational=True, reconstruction_loss="zinb"):
+        super(VADE, self).__init__(n_input, n_hidden=n_hidden, n_latent=n_latent, n_layers=n_layers,
+                                   dropout_rate=dropout_rate, n_batch=n_batch, n_labels=n_labels,
+                                   dispersion=dispersion, log_variational=log_variational,
+                                   reconstruction_loss=reconstruction_loss)
+        self.y_prior = nn.Parameter(
+            y_prior if y_prior is not None else (1 / n_labels) * torch.ones(1, n_labels), requires_grad=False
+        )
         self.n_latent_layers = 1
-        if self.use_cuda:
-            self.cuda()
-            self.y_prior = self.y_prior.cuda()
+        self.n_latent = n_latent
 
-    def initialize_gmm(self, data_loader):
-        latents, _, _ = get_latent_mean(self, data_loader)
-        data = latents  # latents[0]
+    def initialize_gmm(self, data_loader, use_cuda=True):
+        latents, _, _ = get_latents(self, data_loader, use_cuda=use_cuda)
+        data = latents[0]  # latents[0]
         self.gmm = GaussianMixture(n_components=self.n_labels, covariance_type='diag')
         self.gmm.fit(data)
         if self.gmm.converged_:
@@ -54,13 +39,12 @@ class VADE(VAE):
         else:
             print("GMM didn't converge")
 
-        self.z_clusters = nn.Parameter(torch.from_numpy(self.gmm.means_.astype(np.float32)))  #
+        self.z_clusters = nn.Parameter(
+            torch.from_numpy(self.gmm.means_.astype(np.float32)).to(self.y_prior.device)
+        )
         self.log_v_clusters = nn.Parameter(
-            torch.log(torch.from_numpy(self.gmm.covariances_.astype(np.float32))))  # nn.Parameter()
-        if self.use_cuda:
-            self.cuda()
-            self.log_v_clusters = self.log_v_clusters.cuda()
-            self.z_clusters = self.z_clusters.cuda()
+            torch.log(torch.from_numpy(self.gmm.covariances_.astype(np.float32)).to(self.y_prior.device))
+        )
 
     def update_parameters(self, indices):
         new_z_clusters = self.z_clusters.data.new_empty(self.z_clusters.data.size())
@@ -80,50 +64,17 @@ class VADE(VAE):
     def restart(self):
         self.load_state_dict(self.saved_state_dict)
 
-    def sample_from_posterior_z(self, x, y=None):
-        x = torch.log(1 + x)
-        # Here we compute as little as possible to have q(z|x)
-        qz_m, qz_v, z = self.z_encoder(x)
-        if not self.training:
-            z = qz_m
-        return z
-
-    def sample_from_posterior_l(self, x):
-        x = torch.log(1 + x)
-        # Here we compute as little as possible to have q(z|x)
-        ql_m, ql_v, library = self.l_encoder(x)
-        return library
-
-    def get_sample_scale(self, x, y=None, batch_index=None):
-        x = torch.log(1 + x)
-        z = self.sample_from_posterior_z(x)
-        px = self.decoder.px_decoder(z, batch_index)
-        px_scale = self.decoder.px_scale_decoder(px)
-        return px_scale
-
-    def get_sample_rate(self, x, y=None, batch_index=None):
-        x = torch.log(1 + x)
-        z = self.sample_from_posterior_z(x)
-        library = self.sample_from_posterior_l(x)
-        px = self.decoder.px_decoder(z, batch_index)
-        return self.decoder.px_scale_decoder(px) * torch.exp(library)
-
-    def sample(self, z):
-        return self.px_scale_decoder(z)
-
     def get_latents(self, x, label=None):
         zs = [self.sample_from_posterior_z(x)]
         return zs[::-1]
 
     def posterior_assignments(self, x):
-        xs = x
         x_ = x
         if self.log_variational:
             x_ = torch.log(1 + x_)
 
         # Sampling
         qz_m, qz_v, z = self.z_encoder(x_)
-        ql_m, ql_v, library = self.l_encoder(x_)
 
         z_clusters = self.z_clusters.t().unsqueeze(0).expand(z.size()[0], self.n_latent, self.n_labels)
         v_clusters = torch.exp(self.log_v_clusters.t()).unsqueeze(0).expand(z.size()[0], self.n_latent, self.n_labels)
@@ -155,7 +106,7 @@ class VADE(VAE):
         z_clusters = self.z_clusters.t().unsqueeze(0).expand(z.size()[0], self.n_latent, self.n_labels)
         v_clusters = torch.exp(self.log_v_clusters.t()).unsqueeze(0).expand(z.size()[0], self.n_latent, self.n_labels)
 
-        y_prior = self.y_prior.unsqueeze(0).expand(z.size()[0], self.n_labels)
+        y_prior = self.y_prior.expand(z.size()[0], self.n_labels)
 
         zs = z.unsqueeze(2).expand(z.size()[0], z.size()[1], self.n_labels)
         qz_m = qz_m.unsqueeze(2).expand(qz_m.size()[0], qz_m.size()[1], self.n_labels)
@@ -172,13 +123,9 @@ class VADE(VAE):
         kl_normal = torch.sum(kl_normal * probs, dim=-1)
         kl_multinomial = kl(Multinomial(probs=probs), Multinomial(probs=y_prior))
 
-        reconst_loss = 0
+        px_scale, px_r, px_rate, px_dropout = self.decoder(self.dispersion, z, library, batch_index)
 
-        px_scale, px_rate, px_dropout = self.decoder(self.dispersion, z, library, batch_index)
-
-        # # Reconstruction Loss
-        if self.reconstruction_loss == 'zinb':
-            reconst_loss += -log_zinb_positive(x, px_rate, torch.exp(self.px_r), px_dropout)
+        reconst_loss = self._reconstruction_loss(x, px_rate, px_r, px_dropout, batch_index, y)
 
         kl_divergence_l += kl(Multinomial(probs=probs), Multinomial(probs=self.y_prior.view(-1, self.n_labels)))
 

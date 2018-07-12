@@ -8,7 +8,9 @@ from scvi.utils import to_cuda, no_grad, eval_modules
 def get_latent_mean(vae, data_loader, use_cuda=True):
     return get_latent(vae, data_loader, use_cuda=use_cuda)
 
+
 get_latent = get_latent_mean
+
 
 @no_grad()
 @eval_modules()
@@ -52,9 +54,6 @@ def get_latents_with_predictions(vae, data_loader, use_cuda=True):
     batch_indices = np.array(torch.cat(batch_indices))
     predictions = np.array(torch.cat(predictions))
     return latents, batch_indices, labels, predictions
-
-
-
 
 
 # CLUSTERING METRICS

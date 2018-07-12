@@ -40,12 +40,12 @@ class FCLayers(nn.Module):
 
 # Encoder
 class Encoder(nn.Module):
-    def __init__(self, n_input, n_latent=10, n_cat_list=[], n_layers=1, n_hidden=128, dropout_rate=0.1):
+    def __init__(self, n_input, n_output, n_cat_list=[], n_layers=1, n_hidden=128, dropout_rate=0.1):
         super(Encoder, self).__init__()
         self.encoder = FCLayers(n_in=n_input, n_out=n_hidden, n_cat_list=n_cat_list, n_layers=n_layers,
                                 n_hidden=n_hidden, dropout_rate=dropout_rate)
-        self.mean_encoder = nn.Linear(n_hidden, n_latent)
-        self.var_encoder = nn.Linear(n_hidden, n_latent)
+        self.mean_encoder = nn.Linear(n_hidden, n_output)
+        self.var_encoder = nn.Linear(n_hidden, n_output)
 
     def reparameterize(self, mu, var):
         return Normal(mu, var.sqrt()).rsample()
@@ -61,19 +61,19 @@ class Encoder(nn.Module):
 
 # Decoder
 class DecoderSCVI(nn.Module):
-    def __init__(self, n_latent, n_input, n_cat_list=[], n_layers=1, n_hidden=128, dropout_rate=0.1):
+    def __init__(self, n_input, n_output, n_cat_list=[], n_layers=1, n_hidden=128, dropout_rate=0.1):
         super(DecoderSCVI, self).__init__()
-        self.px_decoder = FCLayers(n_in=n_latent, n_out=n_hidden, n_cat_list=n_cat_list, n_layers=n_layers,
+        self.px_decoder = FCLayers(n_in=n_input, n_out=n_hidden, n_cat_list=n_cat_list, n_layers=n_layers,
                                    n_hidden=n_hidden, dropout_rate=dropout_rate)
 
         # mean gamma
-        self.px_scale_decoder = nn.Sequential(nn.Linear(n_hidden, n_input), nn.Softmax(dim=-1))
+        self.px_scale_decoder = nn.Sequential(nn.Linear(n_hidden, n_output), nn.Softmax(dim=-1))
 
         # dispersion: here we only deal with gene-cell dispersion case
-        self.px_r_decoder = nn.Linear(n_hidden, n_input)
+        self.px_r_decoder = nn.Linear(n_hidden, n_output)
 
         # dropout
-        self.px_dropout_decoder = nn.Linear(n_hidden, n_input)
+        self.px_dropout_decoder = nn.Linear(n_hidden, n_output)
 
     def forward(self, dispersion, z, library, *cat_list):
         # The decoder returns values for the parameters of the ZINB distribution
@@ -88,9 +88,9 @@ class DecoderSCVI(nn.Module):
 
 # Decoder
 class Decoder(nn.Module):
-    def __init__(self, n_latent, n_output, n_cat_list=[], n_layers=1, n_hidden=128, dropout_rate=0.1):
+    def __init__(self, n_input, n_output, n_cat_list=[], n_layers=1, n_hidden=128, dropout_rate=0.1):
         super(Decoder, self).__init__()
-        self.decoder = FCLayers(n_in=n_latent, n_out=n_hidden, n_cat_list=n_cat_list, n_layers=n_layers,
+        self.decoder = FCLayers(n_in=n_input, n_out=n_hidden, n_cat_list=n_cat_list, n_layers=n_layers,
                                 n_hidden=n_hidden, dropout_rate=dropout_rate)
 
         self.mean_decoder = nn.Linear(n_hidden, n_output)
@@ -102,3 +102,30 @@ class Decoder(nn.Module):
         p_m = self.mean_decoder(p)
         p_v = torch.exp(self.var_decoder(p))
         return p_m, p_v
+
+
+class LadderEncoder(Encoder):
+    def forward(self, x, *cat_list):
+        q = self.encoder(x, *cat_list)
+        q_m = self.mean_encoder(q)
+        q_v = torch.exp(torch.clamp(self.var_encoder(q), -5, 5))
+        latent = self.reparameterize(q_m, q_v)
+        return (q_m, q_v, latent), q
+
+
+class LadderDecoder(Decoder):
+    def reparameterize(self, mu, var):
+        return Normal(mu, var.sqrt()).rsample()
+
+    def forward(self, x, q_m_hat, q_v_hat, *cat_list):
+        p = self.decoder(x, *cat_list)
+        p_m = self.mean_decoder(p)
+        p_v = torch.exp(torch.clamp(self.var_decoder(p), -5, 5))
+
+        pr1, pr2 = (1 / q_v_hat, 1 / p_v)
+
+        q_m = ((q_m_hat * pr1) + (p_m * pr2)) / (pr1 + pr2)
+        q_v = 1 / (pr1 + pr2)
+
+        latent = self.reparameterize(q_m, q_v)
+        return (q_m, q_v, latent), (p_m, p_v)

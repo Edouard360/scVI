@@ -5,11 +5,12 @@ from .variational_inference import (
     AlternateSemiSupervisedVariationalInference,
     JointSemiSupervisedVariationalInference,
 )
-from .experimental_inference import InfoCatInference
+from .experimental_inference import InfoCatInference, VadeInference
 
 __all__ = ['Inference',
            'ClassifierInference',
            'VariationalInference',
            'AlternateSemiSupervisedVariationalInference',
            'JointSemiSupervisedVariationalInference',
-           'InfoCatInference']
+           'InfoCatInference',
+           'VadeInference']
