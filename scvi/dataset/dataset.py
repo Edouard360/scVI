@@ -3,11 +3,12 @@
 """Handling datasets.
 For the moment, is initialized with a torch Tensor of size (n_cells, nb_genes)"""
 import os
-import urllib.request
 
+import loompy
 import numpy as np
 import scipy.sparse as sp_sparse
 import torch
+import urllib.request
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset
 
@@ -66,7 +67,7 @@ class GeneExpressionDataset(Dataset):
         self.nb_genes = self.X.shape[1]
 
     def update_cells(self, subset_cells):
-        new_n_cells = len(subset_cells) if subset_cells.dtype is not np.bool else subset_cells.sum()
+        new_n_cells = len(subset_cells) if subset_cells.dtype is not np.dtype('bool') else subset_cells.sum()
         print("Downsampling from %i to %i cells" % (len(self), new_n_cells))
         for attr_name in ['X', 'local_means', 'local_vars', 'labels', 'batch_indices']:
             setattr(self, attr_name, getattr(self, attr_name)[subset_cells])
@@ -97,19 +98,23 @@ class GeneExpressionDataset(Dataset):
     def subsample_cells(self, size=1.):
         n_cells, n_genes = self.X.shape
         new_n_cells = int(size * n_genes) if type(size) is not int else size
-        indices = np.argsort(self.X.sum(axis=1))[::-1][:new_n_cells]
+        indices = np.argsort(np.array(self.X.sum(axis=1)).ravel())[::-1][:new_n_cells]
         self.update_cells(indices)
+
+    def _cell_type_idx(self, cell_types):
+        if type(cell_types[0]) is not int:
+            current_cell_types = list(self.cell_types)
+            cell_types_idx = np.array([current_cell_types.index(cell_type) for cell_type in cell_types])
+        else:
+            cell_types_idx = np.array(cell_types, dtype=np.int64)
+        return cell_types_idx
 
     def filter_cell_types(self, cell_types):
         """
         :param cell_types: numpy array of type np.int (indices) or np.str (cell-types names)
         :return:
         """
-        if type(cell_types[0]) is not int:
-            current_cell_types = list(self.cell_types)
-            cell_types_idx = np.array([current_cell_types.index(cell_type) for cell_type in cell_types])
-        else:
-            cell_types_idx = np.array(cell_types, dtype=np.int64)
+        cell_types_idx = self._cell_type_idx(cell_types)
         if hasattr(self, 'cell_types'):
             self.cell_types = self.cell_types[cell_types_idx]
             print("Only keeping cell types: \n" + '\n'.join(list(self.cell_types)))
@@ -119,12 +124,34 @@ class GeneExpressionDataset(Dataset):
         self.update_cells(np.concatenate(idx_to_keep))
         self.labels, self.n_labels = arrange_categories(self.labels, mapping_from=cell_types_idx)
 
+    def merge_cell_types(self, cell_types, new_cell_type_name):
+        cell_types_idx = self._cell_type_idx(cell_types)
+        for idx_from in zip(cell_types_idx):
+            self.labels[self.labels == idx_from] = len(self.labels)  # Put at the end the new merged cell-type
+        self.labels, self.n_labels = arrange_categories(self.labels)
+        if hasattr(self, 'cell_types') and type(cell_types[0]) is not int:
+            new_cell_types = list(self.cell_types)
+            for cell_type in cell_types:
+                new_cell_types.remove(cell_type)
+            new_cell_types.append(new_cell_type_name)
+            self.cell_types = np.array(new_cell_types)
+
     def download(self):
         if hasattr(self, 'urls') and hasattr(self, 'download_names'):
             for url, download_name in zip(self.urls, self.download_names):
                 GeneExpressionDataset._download(url, self.save_path, download_name)
         elif hasattr(self, 'url') and hasattr(self, 'download_name'):
             GeneExpressionDataset._download(self.url, self.save_path, self.download_name)
+
+    def export(self, filename):
+        col_attrs = {"BatchID": self.batch_indices, "ClusterID": self.labels}
+        row_attrs = dict()
+        file_attrs = dict()
+        if hasattr(self, "gene_names"):
+            row_attrs["Gene"] = self.gene_names
+        if hasattr(self, "cell_types"):
+            file_attrs["CellTypes"] = self.cell_types
+        loompy.create("data/" + filename, self.X.T, row_attrs, col_attrs, file_attrs=file_attrs)
 
     @staticmethod
     def _download(url, save_path, download_name):
@@ -188,7 +215,7 @@ class GeneExpressionDataset(Dataset):
         return X, local_means, local_vars, batch_indices, labels
 
     @staticmethod
-    def concat_datasets(*gene_datasets, on='gene_names', shared_labels=True):
+    def concat_datasets(*gene_datasets, on='gene_names', shared_labels=True, shared_batches=False):
         """
         Combines multiple unlabelled gene_datasets based on the intersection of gene names intersection.
         Datasets should all have gene_dataset.n_labels=0.
@@ -215,7 +242,7 @@ class GeneExpressionDataset(Dataset):
         for gene_dataset in gene_datasets:
             next_index = current_index + len(gene_dataset)
             batch_indices[current_index:next_index] = gene_dataset.batch_indices + n_batch_offset
-            n_batch_offset += gene_dataset.n_batches
+            n_batch_offset += (gene_dataset.n_batches if not shared_batches else 0)
             current_index = next_index
 
         cell_types = None

@@ -59,11 +59,12 @@ def run_r_preprocessing():
 
 
 class PurePBMC(GeneExpressionDataset):
-    def __init__(self):
+    def __init__(self, use_separate_batches=False):
         path = "data/mp/pure_full.svmlight"
         if not os.path.exists(path):
             run_r_preprocessing()
         sparse_matrix, labels = load_svmlight_file(path)
+
         labels = labels - 1
 
         print("Purified PBMC dataset loaded with shape : ", sparse_matrix.shape)
@@ -75,12 +76,19 @@ class PurePBMC(GeneExpressionDataset):
         gene_names = ["ENSG00000" + suffix for suffix in gene_names[1:-5]]
         self.gene_symbols = gene_symbols[1:-5]
 
+        cell_types = [index_to_color[i][0] for i in range(len(key_svmlight))]
         # Consider bead enriched subpopulations as individual batches
-        super(PurePBMC, self).__init__(
-            *GeneExpressionDataset.get_attributes_from_list(
-                [sparse_matrix[labels == i] for i in range(int(labels[-1] + 1))],
-                list_labels=[labels[labels == i] for i in range(int(labels[-1] + 1))]),
-            gene_names=gene_names)
+        if use_separate_batches:
+            super(PurePBMC, self).__init__(
+                *GeneExpressionDataset.get_attributes_from_list(
+                    [sparse_matrix[labels == i] for i in range(int(labels[-1] + 1))],
+                    list_labels=[labels[labels == i] for i in range(int(labels[-1] + 1))]),
+                gene_names=gene_names, cell_types=cell_types)
+        else:
+            super(PurePBMC, self).__init__(
+                *GeneExpressionDataset.get_attributes_from_matrix(sparse_matrix, labels=labels),
+                gene_names=gene_names, cell_types=cell_types
+            )
 
 
 class DonorPBMC(GeneExpressionDataset):
@@ -91,6 +99,7 @@ class DonorPBMC(GeneExpressionDataset):
         sparse_matrix, labels = load_svmlight_file(path)
         labels = labels - 1
         # Labels here are not ground truth. They are inferred from correlation scores (cf. paper).
+        cell_types = [index_to_color[i][0] for i in range(len(key_svmlight))]
 
         print("Donor PBMC dataset loaded with shape : ", sparse_matrix.shape)
 
@@ -105,4 +114,4 @@ class DonorPBMC(GeneExpressionDataset):
             *GeneExpressionDataset.get_attributes_from_matrix(
                 sparse_matrix,
                 labels=labels),
-            gene_names=gene_names)
+            gene_names=gene_names, cell_types=cell_types)

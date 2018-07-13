@@ -13,5 +13,6 @@ def show_t_sne(latent, labels, n_samples=1000):
     plt.scatter(latent[:, 0], latent[:, 1], c=(np.array(labels)[idx_t_sne]).ravel(), edgecolors='none')
     plt.axis("off")
     plt.tight_layout()
+    plt.show()
     print("saving tsne figure as tsne.png")
     plt.savefig("tsne.png")

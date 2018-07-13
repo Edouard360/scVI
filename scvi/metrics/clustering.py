@@ -6,7 +6,8 @@ from scvi.utils import to_cuda, no_grad, eval_modules
 
 @eval_modules()
 def get_latent_mean(vae, data_loader, use_cuda=True):
-    return get_latent(vae, data_loader, use_cuda=use_cuda)
+    latents, batch_indices, labels = get_latents(vae, data_loader, use_cuda=use_cuda)
+    return latents[0], batch_indices, labels
 
 
 get_latent = get_latent_mean

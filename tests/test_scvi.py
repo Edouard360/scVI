@@ -59,7 +59,7 @@ def test_synthetic_1():
     infer_synthetic_svaec.fit(n_epochs=1)
     infer_synthetic_svaec.entropy_batch_mixing('labelled')
 
-    vaec = VAEC(synthetic_dataset.nb_genes, synthetic_dataset.n_labels, n_batch=synthetic_dataset.n_batches)
+    vaec = VAEC(synthetic_dataset.nb_genes, synthetic_dataset.n_batches, synthetic_dataset.n_labels)
     infer_synthetic_vaec = JointSemiSupervisedVariationalInference(vaec, synthetic_dataset, use_cuda=use_cuda,
                                                                    early_stopping_metric='ll', frequency=1,
                                                                    save_best_state_metric='accuracy', on='labelled')
@@ -69,7 +69,7 @@ def test_synthetic_1():
 
 
 def base_benchmark(gene_dataset):
-    vae = VAE(gene_dataset.nb_genes, gene_dataset.n_labels, n_batch=gene_dataset.n_batches)
+    vae = VAE(gene_dataset.nb_genes, gene_dataset.n_batches, gene_dataset.n_labels)
     infer = VariationalInference(vae, gene_dataset, train_size=0.5, use_cuda=use_cuda)
     infer.fit(n_epochs=1)
     return infer
@@ -174,3 +174,12 @@ def test_filter_and_concat_datasets():
 
     synthetic_dataset_1.subsample_cells(50)
     assert len(synthetic_dataset_1) == 50
+
+    synthetic_dataset_3 = SyntheticDataset(n_batches=2, n_labels=5)
+    synthetic_dataset_3.cell_types = np.array(["A", "B", "C", "D", "E"])
+    to_merge = (synthetic_dataset_3.labels == 1) + (synthetic_dataset_3.labels == 2)
+    to_shift = (synthetic_dataset_3.labels == 4)
+    synthetic_dataset_3.merge_cell_types(["B", "C"], "F")
+    assert (synthetic_dataset_3.cell_types == np.array(["A", "D", "E", "F"])).all()
+    assert (to_merge != (synthetic_dataset_3.labels == 3)).sum() == 0
+    assert (to_shift != (synthetic_dataset_3.labels == 2)).sum() == 0
