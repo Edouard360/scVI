@@ -59,6 +59,10 @@ class DataLoaders:
     data_loaders_loop = []
 
     def __init__(self, gene_dataset, **data_loaders_kwargs):
+        """
+        :param gene_dataset: a GeneExpressionDataset instance
+        :param data_loaders_kwargs: any additional keyword arguments to pass to the data_loaders at .init
+        """
         self.gene_dataset = gene_dataset
         self.data_loaders_kwargs = {
             "batch_size": 128,
@@ -67,9 +71,16 @@ class DataLoaders:
         }
         self.data_loaders_kwargs.update(data_loaders_kwargs)
         self.data_loaders_dict = {'sequential': self()}
+        self.infinite_random_sampler = cycle(self(shuffle=True))  # convenient for debugging - see .sample()
+
+    def sample(self):
+        return next(self.infinite_random_sampler)  # single batch random sampling for debugging purposes
 
     def __getitem__(self, item):
         return self.data_loaders_dict[item]
+
+    def __setitem__(self, key, value):
+        self.data_loaders_dict[key] = value
 
     def __contains__(self, item):
         return item in self.data_loaders_dict
@@ -117,7 +128,6 @@ class TrainTestDataLoaders(DataLoaders):
         """
         :param train_size: float, int, or None (default is 0.1)
         :param test_size: float, int, or None (default is None)
-        :return: data_loader_labelled/data_loader_unlabelled/data_loader_all
         """
         super(TrainTestDataLoaders, self).__init__(gene_dataset, **data_loaders_kwargs)
 
@@ -142,12 +152,7 @@ class SemiSupervisedDataLoaders(DataLoaders):
 
     def __init__(self, gene_dataset, n_labelled_samples_per_class=50, seed=0, **data_loaders_kwargs):
         """
-        For use in train_semi_supervised
-        Get labelled/unlabelled/all data_loaders from gene_dataset
-        :param gene_dataset: the gene_dataset to consider
         :param n_labelled_samples_per_class: number of labelled samples per class
-        :param kwargs_data_loader: any additional keyword arguments to pass to the dataloaders
-        :return: data_loader_labelled/data_loader_unlabelled/data_loader_all
         """
         super(SemiSupervisedDataLoaders, self).__init__(gene_dataset, **data_loaders_kwargs)
         indices_labelled, indices_unlabelled = (
