@@ -145,8 +145,8 @@ class LinearStatic(nn.Module):
 
         gmm = GaussianMixture(n_components=self.in_features)
         gmm.fit(data)
-        numpy_clusters = gmm.predict(data).reshape(-1,1)
-        print([(numpy_clusters==i).mean() for i in range(self.in_features)])
+        numpy_clusters = gmm.predict(data).reshape(-1, 1)
+        print([(numpy_clusters == i).mean() for i in range(self.in_features)])
 
         gene_clusters = torch.from_numpy(numpy_clusters).to(self.weight.device).type(torch.int)
         self.weight = nn.Parameter(one_hot(gene_clusters, self.in_features), requires_grad=False)
@@ -155,14 +155,14 @@ class LinearStatic(nn.Module):
         return F.linear(x, self.weight)
 
     def backward(self, x):
-        t = self.weight.transpose(0,1)
+        t = self.weight.transpose(0, 1)
         # inverse = torch.inverse(F.linear(self.weight.T,self.weight).detach())
         return F.linear(x, F.linear(torch.inverse(F.linear(t, t)), self.weight))
 
 
 class CouplingVAPNEV(nn.Module):  # 2016 - Deep Variational Inference Without Pixel-Wise Reconstruction
     def __init__(self, x_dim, z_dim):
-        super(CouplingLayer, self).__init__()
+        super(CouplingVAPNEV, self).__init__()
         self.alpha = nn.Parameter(torch.randn(x_dim, 2))  # 2 because there is l_z and m_z
         self.beta_1 = nn.Parameter(torch.randn(x_dim, 2))
         self.beta_2 = nn.Parameter(torch.randn(x_dim, 2))
@@ -185,25 +185,27 @@ class CouplingVAPNEV(nn.Module):  # 2016 - Deep Variational Inference Without Pi
             x_ = torch.masked_select(x, self.mask)
         else:
             x_ = torch.masked_select(x, 1 - self.mask)
-        l_z = self.l1(x_) * self.l2(z) + self.beta_1[:, 0] * self.l1(x_) + self.beta_2[:, 0] * self.l2(z) + self.b[:, 0]
-        m_z = self.l1(x_) * self.l2(z) + self.beta_1[:, 1] * self.l1(x_) + self.beta_2[:, 1] * self.l2(z) + self.b[:, 1]
+        l_z = self.l1(x_) * self.l2(z) + self.beta_1[:, 0] * self.l1(x_) \
+            + self.beta_2[:, 0] * self.l2(z) + self.b[:, 0]
+        m_z = self.l1(x_) * self.l2(z) + self.beta_1[:, 1] * self.l1(x_) \
+            + self.beta_2[:, 1] * self.l2(z) + self.b[:, 1]
         # log(det(J = df/dx)) = sum(l_z)
         return l_z, m_z
 
     def y_x(self, x, z, mask_id=1):
         l_z, m_z = self(x, z, mask_id=mask_id)
         mask = self.mask if mask_id else 1 - self.mask
-        return torch.masked_select(x, mask) + torch.masked_select(x*torch.exp(l_z)+m_z, 1 - mask)
+        return torch.masked_select(x, mask) + torch.masked_select(x * torch.exp(l_z) + m_z, 1 - mask)
 
     def x_y(self, y, z, mask_id=1):
         l_z, m_z = self(y, z, mask_id=mask_id)
         mask = self.mask if mask_id else 1 - self.mask
-        return torch.masked_select(y, mask) + torch.masked_select((y-m_z)*torch.exp(-l_z), 1 - mask)
+        return torch.masked_select(y, mask) + torch.masked_select((y - m_z) * torch.exp(-l_z), 1 - mask)
 
 
-class CouplingRealNVP(nn.Module): # 2017 - DENSITY ESTIMATION USING REAL NVP - Google Brain
+class CouplingRealNVP(nn.Module):  # 2017 - DENSITY ESTIMATION USING REAL NVP - Google Brain
     def __init__(self, x_dim, z_dim):
-        super(CouplingLayer2, self).__init__()
+        super(CouplingRealNVP, self).__init__()
 
         self.s = nn.Linear(x_dim, x_dim)
         self.t = nn.Linear(x_dim, x_dim)
@@ -213,8 +215,8 @@ class CouplingRealNVP(nn.Module): # 2017 - DENSITY ESTIMATION USING REAL NVP - G
 
     def y_x(self, x, z=None, mask_id=1):
         mask = self.mask if mask_id else 1 - self.mask
-        return torch.masked_select(x, mask) + torch.masked_select(x*torch.exp(self.s(x))+self.t(x), 1 - mask)
+        return torch.masked_select(x, mask) + torch.masked_select(x * torch.exp(self.s(x)) + self.t(x), 1 - mask)
 
     def x_y(self, y, z=None, mask_id=1):
         mask = self.mask if mask_id else 1 - self.mask
-        return torch.masked_select(y, mask) + torch.masked_select((y-self.t(y))*torch.exp(-self.s(y)), 1 - mask)
+        return torch.masked_select(y, mask) + torch.masked_select((y - self.t(y)) * torch.exp(-self.s(y)), 1 - mask)

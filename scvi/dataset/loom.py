@@ -1,7 +1,7 @@
-from .dataset import GeneExpressionDataset
 import loompy
 import numpy as np
-import scipy.sparse as sp_sparse
+
+from .dataset import GeneExpressionDataset
 
 gene_row = 'Gene'
 batch_col = 'BatchID'
@@ -24,6 +24,7 @@ class LoomDataset(GeneExpressionDataset):
         >>> local_loom_dataset = LoomDataset("osmFISH_SScortex_mouse_all_cell.loom", save_path='data/')
 
     """
+
     def __init__(self, filename, save_path='data/', url=None):
         self.download_name = filename
         self.save_path = save_path
@@ -80,6 +81,7 @@ class RetinaDataset(LoomDataset):
         >>> gene_dataset = RetinaDataset()
 
     """
+
     def __init__(self, save_path='data/'):
         super(RetinaDataset, self).__init__(filename='retina.loom',
                                             save_path=save_path,

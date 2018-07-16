@@ -5,8 +5,9 @@
 # either filtered or raw data
 import os
 import tarfile
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 from scipy import io
 from scipy.sparse import csr_matrix
 
@@ -59,6 +60,7 @@ class Dataset10X(GeneExpressionDataset):
         http://cf.10xgenomics.com/
 
     """
+
     def __init__(self, filename, save_path='data/', type='filtered', new_n_genes=3000, dense=False):
         group = to_groups[filename]
         self.url = ("http://cf.10xgenomics.com/samples/cell-exp/%s/%s/%s_%s_gene_bc_matrices.tar.gz" %
@@ -71,9 +73,6 @@ class Dataset10X(GeneExpressionDataset):
         expression_data, gene_names = self.download_and_preprocess()
         super(Dataset10X, self).__init__(*GeneExpressionDataset.get_attributes_from_matrix(
             expression_data), gene_names=gene_names)
-
-        if new_n_genes is not None:
-            self.subsample_genes(new_n_genes, subset_genes)
 
     def preprocess(self):
         print("Preprocessing dataset")
@@ -117,6 +116,7 @@ class BrainSmallDataset(Dataset10X):
         https://support.10xgenomics.com/single-cell-gene-expression/datasets
 
     """
+
     def __init__(self, save_path='data/'):
         super(BrainSmallDataset, self).__init__(filename="neuron_9k",
                                                 save_path=save_path)
