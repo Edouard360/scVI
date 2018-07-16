@@ -1,7 +1,5 @@
 import copy
-
 import torch
-
 from scvi.utils import enable_grad
 
 

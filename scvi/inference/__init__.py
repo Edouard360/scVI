@@ -3,7 +3,7 @@ from .classifier_inference import ClassifierInference
 from .variational_inference import (
     VariationalInference,
     AlternateSemiSupervisedVariationalInference,
-    JointSemiSupervisedVariationalInference,
+    JointSemiSupervisedVariationalInference
 )
 from .experimental_inference import InfoCatInference, VadeInference
 

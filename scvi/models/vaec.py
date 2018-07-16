@@ -1,14 +1,13 @@
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal, Categorical, kl_divergence as kl
 
+from scvi.models.base import SemiSupervisedModel
 from scvi.models.classifier import Classifier
 from scvi.models.modules import Encoder, DecoderSCVI
-from scvi.models.utils import broadcast_labels, one_hot
+from scvi.models.utils import broadcast_labels
 from scvi.models.vae import VAE
-from .base import SemiSupervisedModel
 
 
 class VAEC(VAE, SemiSupervisedModel):
