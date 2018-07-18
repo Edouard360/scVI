@@ -5,10 +5,12 @@
 """Tests for `scvi` package."""
 
 import numpy as np
+import pytest
 
-from scvi.benchmark import all_benchmarks
+from scvi.benchmark import all_benchmarks, benchmark
 from scvi.dataset import BrainLargeDataset, CortexDataset, RetinaDataset, BrainSmallDataset, HematoDataset, \
     LoomDataset, AnnDataset, CsvDataset, CiteSeqDataset, CbmcDataset, PbmcDataset, SyntheticDataset, \
+    SeqfishDataset, SmfishDataset, BreastCancerDataset, MouseOBDataset, \
     GeneExpressionDataset
 from scvi.inference import JointSemiSupervisedVariationalInference, AlternateSemiSupervisedVariationalInference, \
     ClassifierInference, VariationalInference
@@ -58,14 +60,19 @@ def test_synthetic_1():
     infer_synthetic_svaec = JointSemiSupervisedVariationalInference(svaec, synthetic_dataset, use_cuda=use_cuda)
     infer_synthetic_svaec.fit(n_epochs=1)
     infer_synthetic_svaec.entropy_batch_mixing('labelled')
+    infer_synthetic_svaec.show_t_sne('labelled', n_samples=50)
+    infer_synthetic_svaec.show_t_sne('unlabelled', n_samples=50, color_by='labels')
+    infer_synthetic_svaec.show_t_sne('labelled', n_samples=50, color_by='batches and labels')
 
+
+def test_synthetic_2():
+    synthetic_dataset = SyntheticDataset()
     vaec = VAEC(synthetic_dataset.nb_genes, synthetic_dataset.n_batches, synthetic_dataset.n_labels)
     infer_synthetic_vaec = JointSemiSupervisedVariationalInference(vaec, synthetic_dataset, use_cuda=use_cuda,
                                                                    early_stopping_metric='ll', frequency=1,
                                                                    save_best_state_metric='accuracy', on='labelled')
     infer_synthetic_vaec.fit(n_epochs=20)
     infer_synthetic_vaec.svc_rf(unit_test=True)
-    infer_synthetic_vaec.show_t_sne('labelled', n_samples=50)
 
 
 def base_benchmark(gene_dataset):
@@ -79,7 +86,7 @@ def test_all_benchmarks():
     all_benchmarks(n_epochs=1, unit_test=True)
 
 
-def test_synthetic_2():
+def test_synthetic_3():
     infer = base_benchmark(SyntheticDataset())
     adapt_encoder(infer, n_path=1, n_epochs=1, frequency=1)
 
@@ -183,3 +190,39 @@ def test_filter_and_concat_datasets():
     assert (synthetic_dataset_3.cell_types == np.array(["A", "D", "E", "F"])).all()
     assert (to_merge != (synthetic_dataset_3.labels == 3)).sum() == 0
     assert (to_shift != (synthetic_dataset_3.labels == 2)).sum() == 0
+
+
+def test_seqfish():
+    seqfish_dataset = SeqfishDataset(save_path='tests/data/')
+    base_benchmark(seqfish_dataset)
+
+
+def test_breast_cancer():
+    breast_cancer_dataset = BreastCancerDataset(save_path='tests/data/')
+    base_benchmark(breast_cancer_dataset)
+
+
+def test_mouseob():
+    mouseob_dataset = MouseOBDataset(save_path='tests/data/')
+    base_benchmark(mouseob_dataset)
+
+
+def test_smfish():
+    smfish_dataset = SmfishDataset(save_path='tests/data/')
+    base_benchmark(smfish_dataset)
+
+
+def test_particular_benchmark():
+    synthetic_dataset = SyntheticDataset()
+    benchmark(synthetic_dataset, n_epochs=1, use_cuda=False)
+
+
+@pytest.mark.xfail
+def test_nb_not_zinb():
+    synthetic_dataset = SyntheticDataset()
+    svaec = SVAEC(synthetic_dataset.nb_genes,
+                  synthetic_dataset.n_batches,
+                  synthetic_dataset.n_labels,
+                  reconstruction_loss="nb")
+    infer_synthetic_svaec = JointSemiSupervisedVariationalInference(svaec, synthetic_dataset, use_cuda=use_cuda)
+    infer_synthetic_svaec.fit(n_epochs=1)
