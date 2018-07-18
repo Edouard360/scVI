@@ -23,6 +23,20 @@ def compute_log_likelihood(vae, data_loader, use_cuda=True):
                  len(data_loader.sampler.indices))
     return log_lkl / n_samples
 
+@no_grad()
+@eval_modules()
+def compute_glow_log_likelihood(model, data_loader, use_cuda=True):
+    # Iterate once over the data_loader and computes the total log_likelihood
+    log_lkl = 0
+    for i_batch, tensors in enumerate(data_loader):
+        tensors = to_cuda(tensors, use_cuda=use_cuda)
+        sample_batch = tensors[0]
+        log = model.loss(sample_batch)
+        log_lkl += torch.sum(log).item()
+    n_samples = (len(data_loader.dataset)
+                 if not (hasattr(data_loader, 'sampler') and hasattr(data_loader.sampler, 'indices')) else
+                 len(data_loader.sampler.indices))
+    return log_lkl / n_samples
 
 def log_zinb_positive(x, mu, theta, pi, eps=1e-8):
     """

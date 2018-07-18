@@ -1,8 +1,6 @@
 import collections
 
 import torch
-import torch.nn.functional as F
-from sklearn.mixture import GaussianMixture
 from torch import nn
 from torch.distributions import Normal
 
@@ -131,92 +129,3 @@ class LadderDecoder(Decoder):
 
         latent = self.reparameterize(q_m, q_v)
         return (q_m, q_v, latent), (p_m, p_v)
-
-
-class LinearStatic(nn.Module):
-    def __init__(self, in_features, out_features):
-        super(LinearStatic, self).__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.weight = nn.Parameter(torch.Tensor(out_features, in_features), requires_grad=False)
-
-    def set_parameters(self, gene_dataset):  # forces an invertible linear mapping from z to mu_z
-        data = gene_dataset.X.T
-
-        gmm = GaussianMixture(n_components=self.in_features)
-        gmm.fit(data)
-        numpy_clusters = gmm.predict(data).reshape(-1, 1)
-        print([(numpy_clusters == i).mean() for i in range(self.in_features)])
-
-        gene_clusters = torch.from_numpy(numpy_clusters).to(self.weight.device).type(torch.int)
-        self.weight = nn.Parameter(one_hot(gene_clusters, self.in_features), requires_grad=False)
-
-    def forward(self, x):
-        return F.linear(x, self.weight)
-
-    def backward(self, x):
-        t = self.weight.transpose(0, 1)
-        # inverse = torch.inverse(F.linear(self.weight.T,self.weight).detach())
-        return F.linear(x, F.linear(torch.inverse(F.linear(t, t)), self.weight))
-
-
-class CouplingVAPNEV(nn.Module):  # 2016 - Deep Variational Inference Without Pixel-Wise Reconstruction
-    def __init__(self, x_dim, z_dim):
-        super(CouplingVAPNEV, self).__init__()
-        self.alpha = nn.Parameter(torch.randn(x_dim, 2))  # 2 because there is l_z and m_z
-        self.beta_1 = nn.Parameter(torch.randn(x_dim, 2))
-        self.beta_2 = nn.Parameter(torch.randn(x_dim, 2))
-        self.b = nn.Parameter(torch.randn(x_dim, 2))
-
-        self.l1 = nn.Linear(x_dim, x_dim)
-        self.l2 = nn.Linear(z_dim, x_dim)
-
-        # We can predefine two masks for x_dim to be split in [1;x_dim//2] [x_dim//2;x_dim]
-        self.mask = torch.tensor([1, 0], dtype=torch.uint8).repeat(x_dim // 2 + 1)[:x_dim]
-
-    def forward(self, x, z, mask_id=1):
-        # x1..d xd+1..D
-        # Conditional coupling should involve z
-        # (2016) paper.
-        # However it seems implementation from https://github.com/taesung89/real-nvp/blob/master/real_nvp/nn.py
-        # Is only using x
-
-        if mask_id:
-            x_ = torch.masked_select(x, self.mask)
-        else:
-            x_ = torch.masked_select(x, 1 - self.mask)
-        l_z = self.l1(x_) * self.l2(z) + self.beta_1[:, 0] * self.l1(x_) \
-            + self.beta_2[:, 0] * self.l2(z) + self.b[:, 0]
-        m_z = self.l1(x_) * self.l2(z) + self.beta_1[:, 1] * self.l1(x_) \
-            + self.beta_2[:, 1] * self.l2(z) + self.b[:, 1]
-        # log(det(J = df/dx)) = sum(l_z)
-        return l_z, m_z
-
-    def y_x(self, x, z, mask_id=1):
-        l_z, m_z = self(x, z, mask_id=mask_id)
-        mask = self.mask if mask_id else 1 - self.mask
-        return torch.masked_select(x, mask) + torch.masked_select(x * torch.exp(l_z) + m_z, 1 - mask)
-
-    def x_y(self, y, z, mask_id=1):
-        l_z, m_z = self(y, z, mask_id=mask_id)
-        mask = self.mask if mask_id else 1 - self.mask
-        return torch.masked_select(y, mask) + torch.masked_select((y - m_z) * torch.exp(-l_z), 1 - mask)
-
-
-class CouplingRealNVP(nn.Module):  # 2017 - DENSITY ESTIMATION USING REAL NVP - Google Brain
-    def __init__(self, x_dim, z_dim):
-        super(CouplingRealNVP, self).__init__()
-
-        self.s = nn.Linear(x_dim, x_dim)
-        self.t = nn.Linear(x_dim, x_dim)
-
-        # We can predefine two masks for x_dim to be split in [1;x_dim//2] [x_dim//2;x_dim]
-        self.mask = torch.tensor([1, 0], dtype=torch.uint8).repeat(x_dim // 2 + 1)[:x_dim]
-
-    def y_x(self, x, z=None, mask_id=1):
-        mask = self.mask if mask_id else 1 - self.mask
-        return torch.masked_select(x, mask) + torch.masked_select(x * torch.exp(self.s(x)) + self.t(x), 1 - mask)
-
-    def x_y(self, y, z=None, mask_id=1):
-        mask = self.mask if mask_id else 1 - self.mask
-        return torch.masked_select(y, mask) + torch.masked_select((y - self.t(y)) * torch.exp(-self.s(y)), 1 - mask)
