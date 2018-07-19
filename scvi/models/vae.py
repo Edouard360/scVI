@@ -57,9 +57,10 @@ class VAE(nn.Module):
         else:  # gene-cell
             pass
 
-        self.z_encoder = Encoder(n_input, n_latent, n_layers=n_layers, n_hidden=n_hidden,
+        self.z_encoder = Encoder(n_input, n_latent, n_cat_list=[n_batch], n_layers=n_layers, n_hidden=n_hidden,
                                  dropout_rate=dropout_rate)
-        self.l_encoder = Encoder(n_input, 1, n_layers=1, n_hidden=n_hidden, dropout_rate=dropout_rate)
+        self.l_encoder = Encoder(n_input, 1, n_cat_list=[n_batch], n_layers=1, n_hidden=n_hidden,
+                                 dropout_rate=dropout_rate)
         self.decoder = DecoderSCVI(n_latent, n_input, n_cat_list=[n_batch], n_layers=n_layers, n_hidden=n_hidden,
                                    dropout_rate=dropout_rate)
 
@@ -113,8 +114,8 @@ class VAE(nn.Module):
             x_ = torch.log(1 + x_)
 
         # Sampling
-        qz_m, qz_v, z = self.z_encoder(x_)
-        ql_m, ql_v, library = self.l_encoder(x_)
+        qz_m, qz_v, z = self.z_encoder(x_, batch_index)
+        ql_m, ql_v, library = self.l_encoder(x_, batch_index)
 
         px_scale, px_r, px_rate, px_dropout = self.decoder(self.dispersion, z, library, batch_index)
 

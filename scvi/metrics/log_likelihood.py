@@ -17,13 +17,10 @@ def compute_log_likelihood(vae, data_loader):
                  len(data_loader.sampler.indices))
     return log_lkl / n_samples
 
-@no_grad()
-@eval_modules()
-def compute_glow_log_likelihood(model, data_loader, use_cuda=True):
+def compute_glow_log_likelihood(model, data_loader):
     # Iterate once over the data_loader and computes the total log_likelihood
     log_lkl = 0
     for i_batch, tensors in enumerate(data_loader):
-        tensors = to_cuda(tensors, use_cuda=use_cuda)
         sample_batch = tensors[0]
         log = model.loss(sample_batch)
         log_lkl += torch.sum(log).item()
