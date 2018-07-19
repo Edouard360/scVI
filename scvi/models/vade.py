@@ -19,10 +19,9 @@ from scvi.models.vae import VAE
 class VADE(VAE):
     def __init__(self, n_input, n_labels, n_hidden=128, n_latent=10, n_layers=1, dropout_rate=0.1, n_batch=0,
                  y_prior=None, dispersion="gene", log_variational=True, reconstruction_loss="zinb"):
-        super(VADE, self).__init__(n_input, n_hidden=n_hidden, n_latent=n_latent, n_layers=n_layers,
-                                   dropout_rate=dropout_rate, n_batch=n_batch, n_labels=n_labels,
-                                   dispersion=dispersion, log_variational=log_variational,
-                                   reconstruction_loss=reconstruction_loss)
+        super(VADE, self).__init__(n_input, n_batch, n_labels, n_hidden=n_hidden, n_latent=n_latent,
+                                   n_layers=n_layers, dropout_rate=dropout_rate, dispersion=dispersion,
+                                   log_variational=log_variational, reconstruction_loss=reconstruction_loss)
         self.y_prior = nn.Parameter(
             y_prior if y_prior is not None else (1 / n_labels) * torch.ones(1, n_labels), requires_grad=False
         )

@@ -3,26 +3,25 @@ import torch.nn as nn
 from torch.distributions import Normal, Categorical, kl_divergence as kl
 
 from scvi.models import VAE
-from scvi.models.base import SemiSupervisedModel
 from scvi.models.classifier import Classifier
 from scvi.models.modules import DecoderSCVI, LadderDecoder, LadderEncoder, Encoder
 from scvi.models.utils import broadcast_labels
 
 
-class LVAEC(VAE, SemiSupervisedModel):
+class LVAEC(VAE):
     '''
     Ladder VAE for classification: multiple layers of stochastic variable
     Instead of having q(z1|z2), we have q(z1|x)
     '''
 
-    def __init__(self, n_input, n_labels, n_hidden=128, n_latent=10, n_layers=1, dropout_rate=0.1, n_batch=0,
+    def __init__(self, n_input, n_batch, n_labels, n_hidden=128, n_latent=[64, 32, 16], n_layers=1, dropout_rate=0.1,
                  y_prior=None, dispersion="gene", log_variational=True, reconstruction_loss="zinb"):
-        super(LVAEC, self).__init__(n_input, n_hidden=n_hidden, n_latent=n_latent, n_layers=n_layers,
-                                    dropout_rate=dropout_rate, n_batch=n_batch, n_labels=n_labels,
+        super(LVAEC, self).__init__(n_input, n_batch, n_labels, n_hidden=n_hidden, n_latent=1,  # will be overwritten
+                                    n_layers=n_layers, dropout_rate=dropout_rate,
                                     dispersion=dispersion, log_variational=log_variational,
                                     reconstruction_loss=reconstruction_loss)
 
-        n_latent_l = [64, 32, 16]
+        n_latent_l = n_latent
 
         self.decoder = DecoderSCVI(n_latent_l[0], n_input, n_cat_list=[n_batch], n_layers=n_layers,
                                    n_hidden=n_hidden, dropout_rate=dropout_rate)

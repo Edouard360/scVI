@@ -68,9 +68,10 @@ class Inference:
                     self.history[metric + '_' + name] += [result]
 
     @enable_grad()
-    def fit(self, n_epochs=20, lr=1e-3):
+    def fit(self, n_epochs=20, lr=1e-3, weight_decay=0):
         optimizer = self.optimizer if hasattr(self, 'optimizer') else \
-            torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=lr)
+            torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=lr,
+                             weight_decay=weight_decay)
         self.epoch = 0
         self.n_epochs = n_epochs
         self.compute_metrics()

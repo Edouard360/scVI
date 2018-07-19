@@ -1,11 +1,13 @@
 import numpy as np
 import torch
+import torch.nn.functional as F
 
-from scvi.dataset.data_loaders import DataLoaders, AlternateSemiSupervisedDataLoaders
+from scvi.dataset.data_loaders import DataLoaders, TrainTestDataLoaders
 from scvi.inference import JointSemiSupervisedVariationalInference, VariationalInference, Inference
 from scvi.metrics.classification import compute_accuracy_svc, compute_accuracy_rf
 from scvi.metrics.log_likelihood import compute_glow_log_likelihood
 from scvi.models import InfoCatVAEC
+from scvi.models.classifier import Classifier
 from scvi.utils import to_cuda
 
 
@@ -33,20 +35,16 @@ class VadeInference(VariationalInference):
 class GlowInference(Inference):
     default_metrics_to_monitor = ['ll']
 
-    def __init__(self, model, gene_dataset, n_labelled_samples_per_class=10, **kwargs):
+    def __init__(self, model, gene_dataset, train_size=0.5, **kwargs):
         super(GlowInference, self).__init__(model, gene_dataset, **kwargs)
-        self.data_loaders = AlternateSemiSupervisedDataLoaders(gene_dataset,
-                                                               n_labelled_samples_per_class=n_labelled_samples_per_class)
-
-    def fit(self, n_epochs=20, lr=1e-4):
+        self.data_loaders = TrainTestDataLoaders(gene_dataset, train_size=train_size)
         self.ll('sequential', verbose=True)
         self.model.initialize(to_cuda(self.data_loaders.sample(), use_cuda=self.use_cuda)[0])
-        self.ll('sequential', verbose=True)
-        print("starting training")
+
+    def fit(self, n_epochs=20, lr=1e-4):
         super(GlowInference, self).fit(n_epochs=n_epochs, lr=lr)
 
     def loss(self, tensors):
-        # print(self.model.z.grad)
         sample_batch, _, _, _, _ = tensors
         log_p_x = self.model.loss(sample_batch)
         loss = torch.mean(log_p_x)
@@ -61,14 +59,6 @@ class GlowInference(Inference):
     ll.mode = 'min'
 
     def svc_rf(self):
-        # ys=[]
-        # latents=[]
-        # for tensor in  self.data_loaders['train']:
-        #     sample_batch, _, _, _, y = to_cuda(tensor, use_cuda=self.use_cuda)[0]
-        #     ys+=[y]
-        #     latents
-        # np.array(torch.cat(ys))
-
         raw_data = DataLoaders.raw_data(self.data_loaders['labelled'], self.data_loaders['unlabelled'])
         (data_train, labels_train), (data_test, labels_test) = raw_data
         svc_scores = compute_accuracy_svc(data_train, labels_train, data_test, labels_test)
@@ -88,4 +78,31 @@ class GlowInference(Inference):
         rf_scores = compute_accuracy_rf(data_train, labels_train, data_test, labels_test)
         print(rf_scores[1])
 
-        return rf_scores  # svc_scores,
+
+class GANInference(VariationalInference):
+    default_metrics_to_monitor = ['ll'] + ['entropy_batch_mixing']
+
+    def __init__(self, *args, scale=100, **kwargs):
+        self.scale = scale
+        print("Scale is ", self.scale)
+        super(GANInference, self).__init__(*args, **kwargs)
+
+    def fit(self, n_epochs=20, lr=1e-3, weight_decay=1e-4):
+        self.GAN1 = Classifier(self.model.n_latent, n_labels=self.model.n_batch, n_layers=3)
+        if self.use_cuda:
+            self.GAN1.cuda()
+        self.optimizer_GAN = torch.optim.Adam(filter(lambda p: p.requires_grad, self.GAN1.parameters()), lr=lr,
+                                              weight_decay=weight_decay)
+        super(VariationalInference, self).fit(n_epochs=n_epochs, lr=lr, weight_decay=weight_decay)
+
+    def loss(self, tensors):
+        if self.epoch > 20:  # Leave a warm-up
+            sample_batch, _, _, batch_index, _ = tensors
+            z = self.model.sample_from_posterior_z(sample_batch)
+            cls_loss = (self.scale * F.cross_entropy(self.GAN1(z), batch_index.view(-1)))  # Might rather change lr ?
+            self.optimizer_GAN.zero_grad()
+            cls_loss.backward(retain_graph=True)
+            self.optimizer_GAN.step()
+        else:
+            cls_loss = 0
+        return super(GANInference, self).loss(tensors) - cls_loss

@@ -57,13 +57,34 @@ def get_latents_with_predictions(vae, data_loader, use_cuda=True):
     return latents, batch_indices, labels, predictions
 
 
+def select_indices_evenly(n_samples, categorical_indices):
+    r'''
+    In t_sne or entropy_batch_mixing, unbalance between the size of the different batches can impair the results.
+    Instead of uniformly random selection of indices over the whole dataset, we split this selection in each
+    categorical subsets, so as to provide equally weighted indices for each cluster.
+    :param n_samples: The number of samples to select per category.
+    :param categorical_indices: a numpy array of shape (n_samples, 1) or n_samples, giving the categories.
+    :return: a numpy array of indices to select
+    '''
+    categorical_indices = categorical_indices.ravel()
+    n = len(np.unique(categorical_indices))
+    indices = []
+    for i in range(n):
+        indices_i = np.where(categorical_indices==i)[0]
+        indices += [indices_i[np.random.permutation(len(indices_i))][:n_samples]]
+    return np.concatenate(indices, axis=0)
+
 # CLUSTERING METRICS
-def entropy_batch_mixing(latent_space, batches, max_number=500):
+def entropy_batch_mixing(latent_space, batches, max_number=500, uniform=False):
     # latent space: numpy matrix of size (number_of_cells, latent_space_dimension)
     # with the encoding of the different inputs in the latent space
     # batches: numpy vector with the batch indices of the cells
     n_samples = len(latent_space)
-    keep_idx = np.random.choice(np.arange(n_samples), size=min(len(latent_space), max_number), replace=False)
+    if uniform:
+        keep_idx = np.random.choice(np.arange(n_samples), size=min(len(latent_space), max_number), replace=False)
+    else:
+        keep_idx = select_indices_evenly(max_number, batches)  # A wiser metric ?
+
     latent_space, batches = latent_space[keep_idx], batches[keep_idx]
 
     def entropy(hist_data):

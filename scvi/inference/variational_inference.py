@@ -2,14 +2,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from sklearn.manifold import TSNE
+from sklearn.mixture import GaussianMixture
 from torch.nn import functional as F
 
 from scvi.dataset import CortexDataset
 from scvi.dataset.data_loaders import DataLoaders
 from scvi.dataset.data_loaders import TrainTestDataLoaders, AlternateSemiSupervisedDataLoaders, \
     JointSemiSupervisedDataLoaders
-from scvi.metrics.classification import compute_accuracy, compute_accuracy_svc, compute_accuracy_rf
-from scvi.metrics.clustering import get_latent, entropy_batch_mixing
+from scvi.metrics.classification import compute_accuracy, compute_accuracy_svc, compute_accuracy_rf, \
+    unsupervised_clustering_accuracy, unsupervised_classification_accuracy
+from scvi.metrics.clustering import get_latent, entropy_batch_mixing, select_indices_evenly
 from scvi.metrics.differential_expression import de_stats, de_cortex
 from scvi.metrics.imputation import imputation
 from scvi.metrics.log_likelihood import compute_log_likelihood
@@ -92,14 +94,29 @@ class VariationalInference(Inference):
             latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name], use_cuda=self.use_cuda)
             be_score = entropy_batch_mixing(latent, batch_indices, **kwargs)
             if verbose:
-                print("Entropy batch mixing :", be_score)
+                print("Entropy batch mixing %s is : %.4f"% (name, be_score))
             return be_score
 
     entropy_batch_mixing.mode = 'max'
 
-    def show_t_sne(self, name, n_samples=1000, color_by='', save_name=''):
+    def unsupervised_clustering_accuracy(self, name, verbose=False):
+        latent, _, labels = get_latent(self.model, self.data_loaders[name], use_cuda=self.use_cuda)
+        data = latent  # latents[0]
+        self.gmm = GaussianMixture(n_components=self.model.n_labels, covariance_type='diag')
+        self.gmm.fit(data)
+        uca = unsupervised_clustering_accuracy(labels, self.gmm.predict(data))[0]
+        if verbose:
+            print("Unsupervised clustering accuracy %s is : %.4f"%(name, uca))
+        return uca
+
+    unsupervised_clustering_accuracy.mode = 'max'
+
+    def show_t_sne(self, name, n_samples=1000, color_by='', save_name='', uniform=False):
         latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name], use_cuda=self.use_cuda)
-        idx_t_sne = np.random.permutation(len(latent))[:n_samples] if n_samples else np.arange(len(latent))
+        if uniform:
+            idx_t_sne = np.random.permutation(len(latent))[:n_samples] if n_samples else np.arange(len(latent))
+        else:
+            idx_t_sne = select_indices_evenly(n_samples, batch_indices)
         if latent.shape[1] != 2:
             latent = TSNE().fit_transform(latent[idx_t_sne])
         if not color_by:
@@ -114,7 +131,7 @@ class VariationalInference(Inference):
                 if hasattr(self.gene_dataset, 'cell_types') and color_by == 'labels':
                     plt_labels = self.gene_dataset.cell_types
                 else:
-                    plt_labels = [str(i) for i in range(len(np.unique(indices)))]
+                    plt_labels = [str(i) for i in range(n)]
                 plt.figure(figsize=(10, 10))
                 for i, label in zip(range(n), plt_labels):
                     plt.scatter(latent[indices == i, 0], latent[indices == i, 1], label=label)
@@ -166,6 +183,21 @@ class SemiSupervisedVariationalInference(VariationalInference):
         svc_scores = compute_accuracy_svc(data_train, labels_train, data_test, labels_test, **kwargs)
         rf_scores = compute_accuracy_rf(data_train, labels_train, data_test, labels_test, **kwargs)
         return svc_scores, rf_scores
+
+    def svc_rf_latent_space(self, **kwargs):
+        data_train, _, labels_train = get_latent(self.model, self.data_loaders['labelled'], use_cuda=self.use_cuda)
+        data_test, _, labels_test = get_latent(self.model, self.data_loaders['unlabelled'], use_cuda=self.use_cuda)
+        svc_scores = compute_accuracy_svc(data_train, labels_train, data_test, labels_test, **kwargs)
+        rf_scores = compute_accuracy_rf(data_train, labels_train, data_test, labels_test, **kwargs)
+        return svc_scores, rf_scores
+
+    def unsupervised_classification_accuracy(self, name, verbose=False): # Need to have a classifier
+        uca_score = unsupervised_classification_accuracy(self.model, self.data_loaders[name], use_cuda=self.use_cuda)[0]
+        if verbose:
+            print("Unsupervised clustering accuracy :", uca_score)
+        return uca_score
+
+    unsupervised_clustering_accuracy.mode = 'max'
 
 
 class AlternateSemiSupervisedVariationalInference(SemiSupervisedVariationalInference):

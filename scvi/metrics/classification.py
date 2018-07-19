@@ -33,7 +33,7 @@ def compute_accuracy_tuple(y_pred, y):
 
 @no_grad()
 @eval_modules()
-def compute_accuracy(vae, data_loader, classifier=None, use_cuda=True):
+def compute_predictions(vae, data_loader, classifier=None, use_cuda=True):
     all_y_pred = []
     all_y = []
 
@@ -50,16 +50,24 @@ def compute_accuracy(vae, data_loader, classifier=None, use_cuda=True):
             if vae is not None:
                 sample_batch, _, _ = vae.z_encoder(sample_batch)
             y_pred = classifier(sample_batch).argmax(dim=-1)
-
         all_y_pred += [y_pred]
 
-    all_y_pred = np.array(torch.cat(all_y_pred))  # .data.numpy()
-    all_y = np.array(torch.cat(all_y))  # .data.numpy()
-    unsupervised_accuracy = unsupervised_clustering_accuracy(all_y_pred, all_y)
-    return unsupervised_accuracy[0]  # accuracy
+    all_y_pred = np.array(torch.cat(all_y_pred))
+    all_y = np.array(torch.cat(all_y))
+    return all_y, all_y_pred
 
 
-def unsupervised_clustering_accuracy(y_pred, y):
+def compute_accuracy(vae, data_loader, classifier=None, use_cuda=True):
+    all_y, all_y_pred = compute_predictions(vae, data_loader, classifier=classifier, use_cuda=use_cuda)
+    return np.mean(all_y == all_y_pred)  # as in scikit learn first the true labels then the predictions
+
+
+def unsupervised_classification_accuracy(vae, data_loader, classifier=None, use_cuda=True):
+    all_y, all_y_pred = compute_predictions(vae, data_loader, classifier=classifier, use_cuda=use_cuda)
+    return unsupervised_clustering_accuracy(all_y, all_y_pred)
+
+
+def unsupervised_clustering_accuracy(y, y_pred):
     """
     Unsupervised Clustering Accuracy
     """
