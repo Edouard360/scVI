@@ -7,8 +7,6 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.svm import SVC
 from sklearn.utils.linear_assignment_ import linear_assignment
 
-from scvi.utils import no_grad, eval_modules, to_cuda
-
 Accuracy = namedtuple('Accuracy', ['unweighted', 'weighted', 'worst', 'accuracy_classes'])
 
 
@@ -31,16 +29,12 @@ def compute_accuracy_tuple(y_pred, y):
     return accuracy_named_tuple
 
 
-@no_grad()
-@eval_modules()
-def compute_predictions(vae, data_loader, classifier=None, use_cuda=True):
+def compute_predictions(vae, data_loader, classifier=None):
     all_y_pred = []
     all_y = []
 
     for i_batch, tensors in enumerate(data_loader):
-        tensors = to_cuda(tensors, use_cuda=use_cuda)
         sample_batch, _, _, _, labels = tensors
-        sample_batch = sample_batch.type(torch.float32)
         all_y += [labels.view(-1)]
 
         if hasattr(vae, 'classify'):
