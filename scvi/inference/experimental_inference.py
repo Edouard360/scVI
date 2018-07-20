@@ -8,7 +8,6 @@ from scvi.metrics.classification import compute_accuracy_svc, compute_accuracy_r
 from scvi.metrics.log_likelihood import compute_glow_log_likelihood
 from scvi.models import InfoCatVAEC
 from scvi.models.classifier import Classifier
-from scvi.utils import to_cuda
 
 
 class InfoCatInference(JointSemiSupervisedVariationalInference):
@@ -82,9 +81,11 @@ class GlowInference(Inference):
 class GANInference(VariationalInference):
     default_metrics_to_monitor = ['ll'] + ['entropy_batch_mixing']
 
-    def __init__(self, *args, scale=100, **kwargs):
+    def __init__(self, *args, scale=100, warm_up=0,  **kwargs):
         self.scale = scale
+        self.warm_up = warm_up
         print("Scale is ", self.scale)
+        print("Warm-up is ", self.warm_up)
         super(GANInference, self).__init__(*args, **kwargs)
 
     def fit(self, n_epochs=20, lr=1e-3, weight_decay=1e-4):
@@ -96,9 +97,9 @@ class GANInference(VariationalInference):
         super(VariationalInference, self).fit(n_epochs=n_epochs, lr=lr, weight_decay=weight_decay)
 
     def loss(self, tensors):
-        if self.epoch > 20:  # Leave a warm-up
+        if self.epoch > self.warm_up:  # Leave a warm-up
             sample_batch, _, _, batch_index, _ = tensors
-            z = self.model.sample_from_posterior_z(sample_batch)
+            z = self.model.sample_from_posterior_z(sample_batch, batch_index)
             cls_loss = (self.scale * F.cross_entropy(self.GAN1(z), batch_index.view(-1)))  # Might rather change lr ?
             self.optimizer_GAN.zero_grad()
             cls_loss.backward(retain_graph=True)

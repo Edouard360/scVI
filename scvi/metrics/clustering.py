@@ -5,7 +5,7 @@ from sklearn.neighbors import NearestNeighbors
 
 
 def get_latent_mean(vae, data_loader):
-    latents, batch_indices, labels = get_latents(vae, data_loader, use_cuda=use_cuda)
+    latents, batch_indices, labels = get_latents(vae, data_loader)
     return latents[0], batch_indices, labels
 
 get_latent = get_latent_mean
