@@ -109,3 +109,71 @@ class SVAEC(VAE):
                             Categorical(probs=self.y_prior.repeat(probs.size(0), 1)))
 
         return reconst_loss, kl_divergence
+
+
+def K(z, gamma=1.):
+    dist_table = z[None, :] - z[:, None]
+    return torch.exp(-gamma * torch.sum(dist_table ** 2, 2))
+
+
+class SVAEC_KNN(SVAEC):
+    '''
+    "Stacked" variational autoencoder for classification - SVAEC
+    (from the stacked generative model M1 + M2)
+    '''
+
+    def __init__(self, *args, gamma=1.0, **kwargs):
+        self.gamma = gamma
+        super(SVAEC_KNN, self).__init__(*args, **kwargs)
+
+    def forward(self, x, local_l_mean, local_l_var, batch_index=None, y=None):
+        is_labelled = False if y is None else True
+
+        x_ = torch.log(1 + x)
+        qz1_m, qz1_v, z1 = self.z_encoder(x_)
+        ql_m, ql_v, library = self.l_encoder(x_)
+
+        # Enumerate choices of label
+        ys, z1s = (
+            broadcast_labels(
+                y, z1, n_broadcast=self.n_labels
+            )
+        )
+        qz2_m, qz2_v, z2 = self.encoder_z2_z1(z1s, ys)
+        pz1_m, pz1_v = self.decoder_z1_z2(z2, ys)
+        px_scale, px_rate, px_dropout = self.decoder(self.dispersion, z1, library, batch_index)
+        reconst_loss = -log_zinb_positive(x, px_rate, torch.exp(self.px_r), px_dropout)
+
+        # KL Divergence
+        mean = torch.zeros_like(qz2_m)
+        scale = torch.ones_like(qz2_v)
+
+        kl_divergence_z2 = kl(Normal(qz2_m, torch.sqrt(qz2_v)), Normal(mean, scale)).sum(dim=1)
+        loss_z1_unweight = - Normal(pz1_m, torch.sqrt(pz1_v)).log_prob(z1s).sum(dim=-1)
+        loss_z1_weight = Normal(qz1_m, torch.sqrt(qz1_v)).log_prob(z1).sum(dim=-1)
+        kl_divergence_l = kl(Normal(ql_m, torch.sqrt(ql_v)), Normal(local_l_mean, torch.sqrt(local_l_var))).sum(dim=1)
+
+        if is_labelled:
+            return reconst_loss + loss_z1_weight + loss_z1_unweight, kl_divergence_z2 + kl_divergence_l
+
+        probs = self.classifier(z1)
+        # values = (k_z1[k_z1 != 1.0].sort()[0]).detach().cpu().numpy()[::-1]
+
+        # Euclidian distance btw probs but KL divergence might be more suited
+        d_probs = torch.sum((probs[None, :] - probs[:, None]) ** 2, 2)
+        # d_probs = torch.sum(probs[None, :]*(torch.log(probs[None, :])-torch.log(probs[:, None])), 2)
+
+        if self.gamma != 0:
+            # Gaussian Kernel between latent variables
+            k_z1 = K(z1, gamma=self.gamma)
+            # Use .detach() if don't want to train on k_z1
+            penalty = torch.sum(d_probs * k_z1)
+        else:
+            penalty = 0
+
+        reconst_loss += (loss_z1_weight + ((loss_z1_unweight).view(self.n_labels, -1).t() * probs).sum(dim=1))
+
+        kl_divergence = (kl_divergence_z2.view(self.n_labels, -1).t() * probs).sum(dim=1)
+        kl_divergence += kl(Multinomial(probs=probs), Multinomial(probs=self.y_prior))
+
+        return reconst_loss, kl_divergence, penalty  # Here add the regularization term
