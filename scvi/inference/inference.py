@@ -18,15 +18,15 @@ class Inference:
         :gene_dataset: A gene_dataset instance like ``CortexDataset()``
         :use_cuda: Default: ``True``.
         :metrics_to_monitor: A list of the metrics to monitor. If not specified, will use the
-        ``default_metrics_to_monitor`` as specified in each . Default: ``None``.
+            ``default_metrics_to_monitor`` as specified in each . Default: ``None``.
         :benchmark: if True, prevents statistics computation in the training. Default: ``False``.
         :verbose: If statistics should be displayed along training. Default: ``None``.
         :frequency: The frequency at which to keep track of statistics. Default: ``None``.
         :early_stopping_metric: The statistics on which to perform early stopping. Default: ``None``.
         :save_best_state_metric:  The statistics on which we keep the network weights achieving the best store, and
-        restore them at the end of training. Default: ``None``.
+            restore them at the end of training. Default: ``None``.
         :on: The data_loader name reference for the ``early_stopping_metric`` and ``save_best_state_metric``, that
-        should be specified if any of them is. Default: ``None``.
+            should be specified if any of them is. Default: ``None``.
     """
     default_metrics_to_monitor = []
 
@@ -72,31 +72,40 @@ class Inference:
                         self.history[metric + '_' + name] += [result]
             self.model.train()
 
-    def fit(self, n_epochs=20, lr=1e-3, weight_decay=0):
+    def train(self, n_epochs=20, lr=1e-3, params=None):
         with torch.set_grad_enabled(True):
             self.model.train()
-            optimizer = self.optimizer if hasattr(self, 'optimizer') else \
-                torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=lr,
-                             weight_decay=weight_decay)
+
+            if params is None:
+                params = filter(lambda p: p.requires_grad, self.model.parameters())
+
+            optimizer = torch.optim.Adam(params, lr=lr, weight_decay=1e-6)
+
             self.epoch = 0
             self.n_epochs = n_epochs
             self.compute_metrics()
+
             with trange(n_epochs, desc="training", file=sys.stdout, disable=self.verbose) as pbar:
                 # We have to use tqdm this way so it works in Jupyter notebook.
                 # See https://stackoverflow.com/questions/42212810/tqdm-in-jupyter-notebook
                 self.on_epoch_begin()
+
                 for epoch in pbar:
                     pbar.update(1)
+
                     for tensors_list in self.data_loaders:
                         loss = self.loss(*tensors_list)
                         optimizer.zero_grad()
                         loss.backward()
                         optimizer.step()
+
                     if not self.on_epoch_end():
                         break
+
             if self.save_best_state_metric is not None:
                 self.model.load_state_dict(self.best_state_dict)
                 self.compute_metrics()
+
             self.model.eval()
 
     def on_epoch_begin(self):
