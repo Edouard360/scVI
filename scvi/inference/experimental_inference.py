@@ -24,10 +24,10 @@ class InfoCatInference(JointSemiSupervisedVariationalInference):
 
 
 class VadeInference(VariationalInference):
-    def fit(self, n_epochs=20, lr=1e-3):
+    def train(self, n_epochs=20, lr=1e-3):
         previous_forward = self.model.forward
         self.model.forward = self.model.forward_vade
-        super(VadeInference, self).fit(n_epochs=20, lr=1e-3)
+        super(VadeInference, self).train(n_epochs=20, lr=1e-3)
         self.model.forward = previous_forward
 
 
@@ -40,8 +40,8 @@ class GlowInference(Inference):
         self.ll('sequential', verbose=True)
         self.model.initialize(to_cuda(self.data_loaders.sample(), use_cuda=self.use_cuda)[0])
 
-    def fit(self, n_epochs=20, lr=1e-4):
-        super(GlowInference, self).fit(n_epochs=n_epochs, lr=lr)
+    def train(self, n_epochs=20, lr=1e-4):
+        super(GlowInference, self).train(n_epochs=n_epochs, lr=lr)
 
     def loss(self, tensors):
         sample_batch, _, _, _, _ = tensors
@@ -88,13 +88,13 @@ class GANInference(VariationalInference):
         print("Warm-up is ", self.warm_up)
         super(GANInference, self).__init__(*args, **kwargs)
 
-    def fit(self, n_epochs=20, lr=1e-3, weight_decay=1e-4):
+    def train(self, n_epochs=20, lr=1e-3, weight_decay=1e-4):
         self.GAN1 = Classifier(self.model.n_latent, n_labels=self.model.n_batch, n_layers=3)
         if self.use_cuda:
             self.GAN1.cuda()
         self.optimizer_GAN = torch.optim.Adam(filter(lambda p: p.requires_grad, self.GAN1.parameters()), lr=lr,
                                               weight_decay=weight_decay)
-        super(VariationalInference, self).fit(n_epochs=n_epochs, lr=lr, weight_decay=weight_decay)
+        super(VariationalInference, self).train(n_epochs=n_epochs, lr=lr, weight_decay=weight_decay)
 
     def loss(self, tensors):
         if self.epoch > self.warm_up:  # Leave a warm-up

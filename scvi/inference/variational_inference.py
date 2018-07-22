@@ -13,11 +13,10 @@ from scvi.dataset import CortexDataset
 from scvi.dataset.data_loaders import DataLoaders
 from scvi.dataset.data_loaders import TrainTestDataLoaders, AlternateSemiSupervisedDataLoaders, \
     JointSemiSupervisedDataLoaders
-from scvi.metrics.classification import compute_accuracy, compute_accuracy_svc, compute_accuracy_rf, \
-    unsupervised_clustering_accuracy, unsupervised_classification_accuracy
-from scvi.metrics.clustering import get_latent, entropy_batch_mixing, select_indices_evenly
 from scvi.metrics.classification import compute_accuracy, compute_accuracy_svc, compute_accuracy_rf
+from scvi.metrics.classification import unsupervised_clustering_accuracy, unsupervised_classification_accuracy
 from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap
+from scvi.metrics.clustering import select_indices_evenly
 from scvi.metrics.differential_expression import de_stats, de_cortex
 from scvi.metrics.imputation import imputation
 from scvi.metrics.log_likelihood import compute_log_likelihood
@@ -46,10 +45,10 @@ class VariationalInference(Inference):
     """
     default_metrics_to_monitor = ['ll']
 
-    def __init__(self, model, gene_dataset, train_size=0.8, use_cuda=True, **kwargs):
-        super(VariationalInference, self).__init__(model, gene_dataset, use_cuda=use_cuda, **kwargs)
+    def __init__(self, model, gene_dataset, train_size=0.8, **kwargs):
+        super(VariationalInference, self).__init__(model, gene_dataset, **kwargs)
         self.kl = None
-        self.data_loaders = TrainTestDataLoaders(self.gene_dataset, train_size=train_size, use_cuda=use_cuda)
+        self.data_loaders = TrainTestDataLoaders(self.gene_dataset, train_size=train_size)
 
     def loss(self, tensors):
         sample_batch, local_l_mean, local_l_var, batch_index, _ = tensors
@@ -87,7 +86,7 @@ class VariationalInference(Inference):
             nmi_score = NMI(labels, labels_pred)
             ari_score = ARI(labels, labels_pred)
             if verbose:
-                print("Clustering Scores for %s:\nSilhouette: %.4f\nNMI: %.4f\nARI: %.4f" %
+                print("Clustering Scores (be higher) for %s:\nSilhouette: %.4f\nNMI: %.4f\nARI: %.4f" %
                       (name, asw_score, nmi_score, ari_score))
             return asw_score, nmi_score, ari_score
 
@@ -123,7 +122,7 @@ class VariationalInference(Inference):
             latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])
             be_score = entropy_batch_mixing(latent, batch_indices, **kwargs)
             if verbose:
-                print("Entropy batch mixing %s is : %.4f"% (name, be_score))
+                print("Entropy batch mixing %s is : %.4f" % (name, be_score))
             return be_score
 
     entropy_batch_mixing.mode = 'max'
@@ -135,7 +134,7 @@ class VariationalInference(Inference):
         self.gmm.fit(data)
         uca = unsupervised_clustering_accuracy(labels, self.gmm.predict(data))[0]
         if verbose:
-            print("Unsupervised clustering accuracy %s is : %.4f"%(name, uca))
+            print("Unsupervised clustering accuracy %s is : %.4f" % (name, uca))
         return uca
 
     unsupervised_clustering_accuracy.mode = 'max'
@@ -188,6 +187,13 @@ class VariationalInference(Inference):
         if save_name:
             plt.savefig(save_name)
 
+    def svc_rf_latent_space(self, **kwargs):
+        data_train, _, labels_train = get_latent(self.model, self.data_loaders['labelled'])
+        data_test, _, labels_test = get_latent(self.model, self.data_loaders['unlabelled'])
+        svc_scores = compute_accuracy_svc(data_train, labels_train, data_test, labels_test, **kwargs)
+        rf_scores = compute_accuracy_rf(data_train, labels_train, data_test, labels_test, **kwargs)
+        return svc_scores, rf_scores
+
 
 class SemiSupervisedVariationalInference(VariationalInference):
     r"""The abstract SemiSupervisedVariationalInference class for the semi-supervised training of an autoencoder.
@@ -213,14 +219,7 @@ class SemiSupervisedVariationalInference(VariationalInference):
         rf_scores = compute_accuracy_rf(data_train, labels_train, data_test, labels_test, **kwargs)
         return svc_scores, rf_scores
 
-    def svc_rf_latent_space(self, **kwargs):
-        data_train, _, labels_train = get_latent(self.model, self.data_loaders['labelled'])
-        data_test, _, labels_test = get_latent(self.model, self.data_loaders['unlabelled'])
-        svc_scores = compute_accuracy_svc(data_train, labels_train, data_test, labels_test, **kwargs)
-        rf_scores = compute_accuracy_rf(data_train, labels_train, data_test, labels_test, **kwargs)
-        return svc_scores, rf_scores
-
-    def unsupervised_classification_accuracy(self, name, verbose=False): # Need to have a classifier
+    def unsupervised_classification_accuracy(self, name, verbose=False):  # Need to have a classifier
         uca_score = unsupervised_classification_accuracy(self.model, self.data_loaders[name])[0]
         if verbose:
             print("Unsupervised clustering accuracy :", uca_score)
@@ -248,13 +247,13 @@ class AlternateSemiSupervisedVariationalInference(SemiSupervisedVariationalInfer
     """
 
     def __init__(self, model, gene_dataset, n_labelled_samples_per_class=50, n_epochs_classifier=1,
-                 lr_classification=0.1, use_cuda=True, **kwargs):
+                 lr_classification=0.1, **kwargs):
         super(AlternateSemiSupervisedVariationalInference, self).__init__(model, gene_dataset, **kwargs)
 
         self.n_epochs_classifier = n_epochs_classifier
         self.lr_classification = lr_classification
         self.data_loaders = AlternateSemiSupervisedDataLoaders(gene_dataset, n_labelled_samples_per_class,
-                                                               use_cuda=use_cuda)
+                                                               use_cuda=self.use_cuda)
 
         self.classifier_inference = ClassifierInference(
             model.classifier, gene_dataset, metrics_to_monitor=[], verbose=True, frequency=0,
@@ -286,7 +285,8 @@ class JointSemiSupervisedVariationalInference(SemiSupervisedVariationalInference
 
     def __init__(self, model, gene_dataset, n_labelled_samples_per_class=50, classification_ratio=100, **kwargs):
         super(JointSemiSupervisedVariationalInference, self).__init__(model, gene_dataset, **kwargs)
-        self.data_loaders = JointSemiSupervisedDataLoaders(gene_dataset, n_labelled_samples_per_class, use_cuda=use_cuda)
+        self.data_loaders = JointSemiSupervisedDataLoaders(gene_dataset, n_labelled_samples_per_class,
+                                                           use_cuda=self.use_cuda)
         self.classification_ratio = classification_ratio
 
     def loss(self, tensors_all, tensors_labelled):

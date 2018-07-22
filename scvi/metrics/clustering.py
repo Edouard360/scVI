@@ -16,7 +16,7 @@ def get_latents(vae, data_loader):
     labels = []
     for tensors in data_loader:
         sample_batch, local_l_mean, local_l_var, batch_index, label = tensors
-        latents_ = vae.get_latents(sample_batch, label)
+        latents_ = vae.get_latents(sample_batch, y=label)
         latents = [l + [l_] for l, l_ in zip(latents, latents_)]
         labels += [label]
         batch_indices += [batch_index]

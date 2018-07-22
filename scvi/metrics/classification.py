@@ -51,13 +51,13 @@ def compute_predictions(vae, data_loader, classifier=None):
     return all_y, all_y_pred
 
 
-def compute_accuracy(vae, data_loader, classifier=None, use_cuda=True):
-    all_y, all_y_pred = compute_predictions(vae, data_loader, classifier=classifier, use_cuda=use_cuda)
+def compute_accuracy(vae, data_loader, classifier=None):
+    all_y, all_y_pred = compute_predictions(vae, data_loader, classifier=classifier)
     return np.mean(all_y == all_y_pred)  # as in scikit learn first the true labels then the predictions
 
 
-def unsupervised_classification_accuracy(vae, data_loader, classifier=None, use_cuda=True):
-    all_y, all_y_pred = compute_predictions(vae, data_loader, classifier=classifier, use_cuda=use_cuda)
+def unsupervised_classification_accuracy(vae, data_loader, classifier=None):
+    all_y, all_y_pred = compute_predictions(vae, data_loader, classifier=classifier)
     return unsupervised_clustering_accuracy(all_y, all_y_pred)
 
 

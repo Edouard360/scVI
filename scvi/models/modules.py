@@ -1,9 +1,10 @@
 import collections
 
+import math
 import torch
 from torch import nn
 from torch.distributions import Normal
-
+import torch.nn.functional as F
 from scvi.models.utils import one_hot
 
 
