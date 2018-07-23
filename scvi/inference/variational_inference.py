@@ -2,21 +2,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from sklearn.cluster import KMeans
+from sklearn.mixture import GaussianMixture as GMM
 from sklearn.manifold import TSNE
 from sklearn.metrics import adjusted_rand_score as ARI
 from sklearn.metrics import normalized_mutual_info_score as NMI
 from sklearn.metrics import silhouette_score
-from sklearn.mixture import GaussianMixture
 from torch.nn import functional as F
 
 from scvi.dataset import CortexDataset
 from scvi.dataset.data_loaders import DataLoaders
 from scvi.dataset.data_loaders import TrainTestDataLoaders, AlternateSemiSupervisedDataLoaders, \
     JointSemiSupervisedDataLoaders
-from scvi.metrics.classification import compute_accuracy, compute_accuracy_svc, compute_accuracy_rf
-from scvi.metrics.classification import unsupervised_clustering_accuracy, unsupervised_classification_accuracy
-from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap
-from scvi.metrics.clustering import select_indices_evenly
+from scvi.metrics.classification import compute_accuracy, compute_accuracy_svc, compute_accuracy_rf, \
+    unsupervised_classification_accuracy, unsupervised_clustering_accuracy
+from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap, select_indices_evenly
 from scvi.metrics.differential_expression import de_stats, de_cortex
 from scvi.metrics.imputation import imputation
 from scvi.metrics.log_likelihood import compute_log_likelihood
@@ -29,7 +28,7 @@ class VariationalInference(Inference):
     r"""The VariationalInference class for the unsupervised training of an autoencoder.
 
     Args:
-        :model: A model instance from class ``VAE``, ``VAEC``, ``SVAEC``, ...
+        :model: A model instance from class ``VAE``, ``VAEC``, ``SVAEC``
         :gene_dataset: A gene_dataset instance like ``CortexDataset()``
         :train_size: The train size, either a float between 0 and 1 or and integer for the number of training samples
          to use Default: ``0.8``.
@@ -45,10 +44,10 @@ class VariationalInference(Inference):
     """
     default_metrics_to_monitor = ['ll']
 
-    def __init__(self, model, gene_dataset, train_size=0.8, **kwargs):
-        super(VariationalInference, self).__init__(model, gene_dataset, **kwargs)
+    def __init__(self, model, gene_dataset, train_size=0.8, use_cuda=True, **kwargs):
+        super(VariationalInference, self).__init__(model, gene_dataset, use_cuda=use_cuda, **kwargs)
         self.kl = None
-        self.data_loaders = TrainTestDataLoaders(self.gene_dataset, train_size=train_size)
+        self.data_loaders = TrainTestDataLoaders(self.gene_dataset, train_size=train_size, use_cuda=self.use_cuda)
 
     def loss(self, tensors):
         sample_batch, local_l_mean, local_l_var, batch_index, _ = tensors
@@ -78,17 +77,24 @@ class VariationalInference(Inference):
 
     imputation.mode = 'min'
 
-    def clustering_scores(self, name, verbose=True):
+    def clustering_scores(self, name, verbose=True, prediction_algorithm='knn'):
         if self.gene_dataset.n_labels > 1:
             latent, _, labels = get_latent(self.model, self.data_loaders[name])
-            labels_pred = KMeans(self.gene_dataset.n_labels, n_init=200).fit_predict(latent)  # n_jobs>1 ?
+            if prediction_algorithm == 'knn':
+                labels_pred = KMeans(self.gene_dataset.n_labels, n_init=200).fit_predict(latent)  # n_jobs>1 ?
+            elif prediction_algorithm == 'gmm':
+                gmm = GMM(self.gene_dataset.n_labels)
+                gmm.fit(latent)
+                labels_pred = gmm.predict(latent)
+
             asw_score = silhouette_score(latent, labels)
             nmi_score = NMI(labels, labels_pred)
             ari_score = ARI(labels, labels_pred)
+            uca_score = unsupervised_clustering_accuracy(labels, labels_pred)[0]
             if verbose:
-                print("Clustering Scores (be higher) for %s:\nSilhouette: %.4f\nNMI: %.4f\nARI: %.4f" %
-                      (name, asw_score, nmi_score, ari_score))
-            return asw_score, nmi_score, ari_score
+                print("Clustering Scores for %s:\nSilhouette: %.4f\nNMI: %.4f\nARI: %.4f\nUCA: %.4f" %
+                      (name, asw_score, nmi_score, ari_score, uca_score))
+            return asw_score, nmi_score, ari_score, uca_score
 
     def nn_overlap_score(self, name='sequential', verbose=True, **kwargs):
         if hasattr(self.gene_dataset, 'adt_expression_clr'):
@@ -209,6 +215,14 @@ class SemiSupervisedVariationalInference(VariationalInference):
 
     accuracy.mode = 'max'
 
+    def unsupervised_accuracy(self, name, verbose=False):
+        uca = unsupervised_classification_accuracy(self.model, self.data_loaders[name])[0]
+        if verbose:
+            print("UCA for %s is : %.4f" % (name, uca))
+        return uca
+
+    unsupervised_accuracy.mode = 'max'
+
     def svc_rf(self, **kwargs):
         if 'train' in self.data_loaders:
             raw_data = DataLoaders.raw_data(self.data_loaders['train'], self.data_loaders['test'])
@@ -218,14 +232,6 @@ class SemiSupervisedVariationalInference(VariationalInference):
         svc_scores = compute_accuracy_svc(data_train, labels_train, data_test, labels_test, **kwargs)
         rf_scores = compute_accuracy_rf(data_train, labels_train, data_test, labels_test, **kwargs)
         return svc_scores, rf_scores
-
-    def unsupervised_classification_accuracy(self, name, verbose=False):  # Need to have a classifier
-        uca_score = unsupervised_classification_accuracy(self.model, self.data_loaders[name])[0]
-        if verbose:
-            print("Unsupervised clustering accuracy :", uca_score)
-        return uca_score
-
-    unsupervised_clustering_accuracy.mode = 'max'
 
 
 class AlternateSemiSupervisedVariationalInference(SemiSupervisedVariationalInference):

@@ -10,7 +10,7 @@ from sklearn.utils.linear_assignment_ import linear_assignment
 Accuracy = namedtuple('Accuracy', ['unweighted', 'weighted', 'worst', 'accuracy_classes'])
 
 
-def compute_accuracy_tuple(y_pred, y):
+def compute_accuracy_tuple(y, y_pred):
     y = y.ravel()
     n_labels = len(np.unique(y))
     classes_probabilities = []
@@ -53,7 +53,7 @@ def compute_predictions(vae, data_loader, classifier=None):
 
 def compute_accuracy(vae, data_loader, classifier=None):
     all_y, all_y_pred = compute_predictions(vae, data_loader, classifier=classifier)
-    return np.mean(all_y == all_y_pred)  # as in scikit learn first the true labels then the predictions
+    return np.mean(all_y == all_y_pred)
 
 
 def unsupervised_classification_accuracy(vae, data_loader, classifier=None):
@@ -90,8 +90,8 @@ def compute_accuracy_svc(data_train, labels_train, data_test, labels_test, unit_
     y_pred_test = clf.predict(data_test)
     y_pred_train = clf.predict(data_train)
 
-    return (compute_accuracy_tuple(y_pred_train, labels_train),
-            compute_accuracy_tuple(y_pred_test, labels_test))
+    return (compute_accuracy_tuple(labels_train, y_pred_train),
+            compute_accuracy_tuple(labels_test, y_pred_test))
 
 
 def compute_accuracy_rf(data_train, labels_train, data_test, labels_test, unit_test=False, verbose=0):
