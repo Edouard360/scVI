@@ -1,3 +1,4 @@
+import copy
 from itertools import cycle
 
 import numpy as np
@@ -10,6 +11,7 @@ from torch.utils.data.sampler import SubsetRandomSampler, SequentialSampler, Ran
 class DataLoaderWrapper(DataLoader):
     def __init__(self, dataset, use_cuda=True, **data_loaders_kwargs):
         self.use_cuda = use_cuda and torch.cuda.is_available()
+        self.data_loaders_kwargs = data_loaders_kwargs
         super(DataLoaderWrapper, self).__init__(dataset, **data_loaders_kwargs)
 
     def to_cuda(self, tensors):
@@ -18,6 +20,13 @@ class DataLoaderWrapper(DataLoader):
 
     def __iter__(self):
         return map(self.to_cuda, super(DataLoaderWrapper, self).__iter__())
+
+    def __add__(self, other):
+        assert hasattr(self.sampler, "indices") and hasattr(other.sampler, "indices")
+        new_indices = np.sort(np.concatenate((self.sampler.indices, other.sampler.indices)))
+        new_data_loaders_kwargs = copy.copy(self.data_loaders_kwargs)
+        new_data_loaders_kwargs["sampler"] = SubsetRandomSampler(new_indices)
+        return DataLoaderWrapper(self.dataset, use_cuda=self.use_cuda, **new_data_loaders_kwargs)
 
 
 class DataLoaders:
@@ -65,6 +74,8 @@ class DataLoaders:
             else:
                 sampler = SequentialSampler(self.gene_dataset)
         else:
+            if hasattr(indices, 'dtype') and indices.dtype is np.dtype('bool'):
+                indices = np.where(indices)[0].ravel()
             sampler = SubsetRandomSampler(indices)
         return DataLoaderWrapper(self.gene_dataset, use_cuda=self.use_cuda, sampler=sampler,
                                  **self.data_loaders_kwargs)

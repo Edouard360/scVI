@@ -58,9 +58,8 @@ def select_indices_evenly(n_samples, categorical_indices):
     :return: a numpy array of indices to select
     '''
     categorical_indices = categorical_indices.ravel()
-    n = len(np.unique(categorical_indices))
     indices = []
-    for i in range(n):
+    for i in np.unique(categorical_indices):
         indices_i = np.where(categorical_indices==i)[0]
         indices += [indices_i[np.random.permutation(len(indices_i))][:n_samples]]
     return np.concatenate(indices, axis=0)

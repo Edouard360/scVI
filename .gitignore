@@ -116,5 +116,6 @@ tests/data/
 single-cell-3prime-paper/
 examples/experiments/
 examples/help/
+examples/scripts/
 data
 run_main.py

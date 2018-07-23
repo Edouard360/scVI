@@ -136,7 +136,7 @@ class VariationalInference(Inference):
     def unsupervised_clustering_accuracy(self, name, verbose=False):
         latent, _, labels = get_latent(self.model, self.data_loaders[name])
         data = latent  # latents[0]
-        self.gmm = GaussianMixture(n_components=self.model.n_labels, covariance_type='diag')
+        self.gmm = GMM(n_components=self.model.n_labels, covariance_type='diag')
         self.gmm.fit(data)
         uca = unsupervised_clustering_accuracy(labels, self.gmm.predict(data))[0]
         if verbose:
@@ -214,6 +214,13 @@ class SemiSupervisedVariationalInference(VariationalInference):
         return acc
 
     accuracy.mode = 'max'
+
+    def benchmark_accuracy(self, name, last_n_values=10):
+        values = self.history['accuracy_' + name][-last_n_values:]
+        mean = np.mean(values)
+        std = 2 * np.sqrt(np.var(values)) / np.sqrt(last_n_values)
+        print("Acc for %s is : %.4f +- %.4f" % (name, mean, std))
+        return mean
 
     def unsupervised_accuracy(self, name, verbose=False):
         uca = unsupervised_classification_accuracy(self.model, self.data_loaders[name])[0]

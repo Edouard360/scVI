@@ -3,57 +3,61 @@ import numpy as np
 from scvi.dataset import *
 from scvi.models import *
 from scvi.inference import *
-# TODO: at https://github.com/hemberg-lab/scRNA.seq.datasets/tree/master/bash
-# execute segerstolpe.sh
-# execute muraro.sh
 
-# TODO: then execute the R scripts at https://github.com/hemberg-lab/scRNA.seq.datasets/blob/master/R
-# Just beware of the path mappings
 
 scmap = SCMAP()
+# TODO 1 a) : scmap comparison: xin, segerstolpe, muraro, baron-human
+dataset_xin = scmap.create_dataset("../scmap/xin/xin.rds")
+cell_types_xin = list(filter(lambda p: ".contaminated" not in p, dataset_xin.cell_types))
+dataset_xin.filter_cell_types(cell_types_xin)
 
-dataset_1 = scmap.create_dataset("../scmap/xin/xin.rds")
-cell_types_1 = list(filter(lambda p: ".contaminated" not in p, dataset_1.cell_types))
-dataset_1.filter_cell_types(cell_types_1)
-dataset_1.subsample_genes(subset_genes=(dataset_1.X.max(axis=0) > 1500).ravel())
+dataset_segerstolpe = scmap.create_dataset("../scmap/segerstolpe/segerstolpe.rds")
+cell_types_segerstolpe = list(filter(lambda p: p != "not applicable", dataset_segerstolpe.cell_types))
+dataset_segerstolpe.filter_cell_types(cell_types_segerstolpe)
 
-dataset_2 = scmap.create_dataset("../scmap/segerstolpe/segerstolpe.rds")
-cell_types_2 = list(filter(lambda p: p != "not applicable", dataset_2.cell_types))
-dataset_2.filter_cell_types(cell_types_2)
-dataset_2.subsample_genes(subset_genes=(dataset_2.X.max(axis=0) > 1500).ravel())
+dataset_muraro = scmap.create_dataset("../scmap/muraro/muraro.rds")
+dataset_baron = scmap.create_dataset("../scmap/baron-human/baron-human.rds")
 
-dataset_3 = scmap.create_dataset("../scmap/muraro/muraro.rds")
+concatenated = GeneExpressionDataset.concat_datasets(dataset_xin, dataset_segerstolpe, dataset_muraro, dataset_baron, on='gene_symbols')  #
+concatenated.subsample_genes(subset_genes=(dataset_xin.X.max(axis=0) > 2500).ravel())
+all_cell_types = list(filter(lambda p: p != "unknown", dataset_xin.cell_types))
+concatenated.filter_cell_types(all_cell_types)
 
-concatenated = GeneExpressionDataset.concat_datasets(dataset_1, dataset_2, dataset_3, on='gene_symbols')  #
-concatenated.subsample_genes(2000)
+#concatenated.subsample_genes(2000)
 
-# data_loaders_ = SemiSupervisedDataLoaders(dataset_1, n_labelled_samples_per_class=10)
+# data_loaders_ = SemiSupervisedDataLoaders(dataset_xin, n_labelled_samples_per_class=10)
 data_loaders = SemiSupervisedDataLoaders(concatenated, n_labelled_samples_per_class=10)
-data_loaders['xin'] = data_loaders(indices=range(len(dataset_1)))
-data_loaders['labelled'] = data_loaders(indices=range(len(dataset_1), len(concatenated)))
-# len(concatenated)))#data_loaders_['labelled'].sampler.indices)#data_loaders_['labelled'].sampler.indices+len(dataset_1))
-data_loaders['segerstolpe'] = data_loaders(indices=range(len(dataset_1), len(dataset_2) + len(dataset_1)))
-data_loaders['muraro'] = data_loaders(indices=range(len(dataset_2) + len(dataset_1), len(concatenated)))
+data_loaders['xin'] = data_loaders(indices=range(len(dataset_xin)))
+data_loaders['labelled'] = data_loaders(indices=range(len(dataset_xin), len(concatenated)))
+data_loaders['segerstolpe'] = data_loaders(indices=range(len(dataset_xin), len(dataset_segerstolpe) + len(dataset_xin)))
+data_loaders['muraro'] = data_loaders(indices=range(len(dataset_segerstolpe) + len(dataset_xin), len(concatenated)))
 data_loaders.to_monitor = ['xin', 'segerstolpe', 'muraro', 'sequential']
 data_loaders.data_loaders_loop = ['all', 'labelled']
 
+# len(concatenated)))#data_loaders_['labelled'].sampler.indices)#data_loaders_['labelled'].sampler.indices+len(dataset_xin))
 
+# TODO 1 b) : scmap comparison: shekhar, macosko
 
-# svaec = SVAEC(concatenated.nb_genes, concatenated.n_batches, concatenated.n_labels)
-#
-# infer = JointSemiSupervisedVariationalInference(svaec, concatenated, frequency=5, verbose=True,
-#                                                 classification_ratio=1000)
-# infer.data_loaders = data_loaders
-# infer.train(n_epochs=70)
+dataset_shekhar = scmap.create_dataset("../scmap/shekhar/shekhar.rds")
+dataset_macosko = scmap.create_dataset("../scmap/macosko/macosko.rds")
+
+concatenated = GeneExpressionDataset.concat_datasets(dataset_shekhar,dataset_macosko, on='gene_symbols')
+
+svaec = SVAEC(concatenated.nb_genes, concatenated.n_batches, concatenated.n_labels)
+
+infer = JointSemiSupervisedVariationalInference(svaec, concatenated, frequency=5, verbose=True,
+                                                classification_ratio=1000)
+infer.data_loaders = data_loaders
+infer.train(n_epochs=70)
 
 (X_train, labels_train), = data_loaders.raw_data(data_loaders['segerstolpe'])
 (X_test, labels_test), = data_loaders.raw_data(data_loaders['xin'])
 scmap.create_sce_object(X_train, concatenated.gene_names, labels_train, 'd_train')
 scmap.create_sce_object(X_test, concatenated.gene_names, labels_test, 'd_test')
 
-unique_train = np.unique(labels_train)
-
-print("MAX Accuracy = ", np.mean([1 if l in unique_train else 0 for l in labels_test]))
+# unique_train = np.unique()
+#
+# print("MAX Accuracy = ", np.mean([1 if l in unique_train else 0 for l in labels_test]))
 
 labels_pred = scmap.scmap_cluster(
     'd_train', 'd_test', threshold=0, n_features=500
@@ -64,10 +68,6 @@ labels_pred = scmap.scmap_cell(
     'd_train', 'd_test', w=5, n_features=500, threshold=0
 )
 print("Accuracy result scmap_cell:", scmap.accuracy_tuple(labels_test, labels_pred))
-
-#  >>> ro.r("scmapCell_results[[1]]$cells").shape
-# (5, 1492)
-
 
 
 

@@ -122,7 +122,7 @@ class GeneExpressionDataset(Dataset):
         idx_to_keep = []
         for idx in cell_types_idx:
             idx_to_keep += [np.where(self.labels == idx)[0]]
-        self.update_cells(np.concatenate(idx_to_keep))
+        self.update_cells(np.sort(np.concatenate(idx_to_keep)))
         self.labels, self.n_labels = arrange_categories(self.labels, mapping_from=cell_types_idx)
 
     def merge_cell_types(self, cell_types, new_cell_type_name):

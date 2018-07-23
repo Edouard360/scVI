@@ -39,8 +39,16 @@ class SCMAP():
         counts = (np.exp(log_counts * np.log(2)) - 1).T.astype(np.int)
         gene_symbols = ro.r("rowData(sce)$feature_symbol")
         labels = ro.r("colData(sce)$cell_type1")
+        labels_levels = ro.r("levels(colData(sce)$cell_type1)")
+        if labels_levels is not rpy2.rinterface.NULL:
+            labels = np.array([labels_levels[int(l) - 1] for l in labels])
+
         cell_types = list(np.unique(labels))
         labels = np.array([cell_types.index(l) for l in labels])
+
+        valid_idx = (counts.sum(axis=1) > 200).ravel()  # Filter bad quality cells
+        counts = counts[valid_idx]
+        labels = labels[valid_idx]
         gene_expression_dataset = GeneExpressionDataset(
             *GeneExpressionDataset.get_attributes_from_matrix(counts, labels=labels), cell_types=cell_types
         )
