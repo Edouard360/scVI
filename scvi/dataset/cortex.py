@@ -2,6 +2,7 @@ import csv
 
 import numpy as np
 
+from examples.help.saver import pickle_result
 from .dataset import GeneExpressionDataset
 
 
@@ -45,6 +46,7 @@ class CortexDataset(GeneExpressionDataset):
                 labels=labels),
             gene_names=np.char.upper(gene_names), cell_types=cell_types)
 
+    @pickle_result('data/cortex-tmp')
     def preprocess(self):
         print("Preprocessing Cortex data")
         rows = []
