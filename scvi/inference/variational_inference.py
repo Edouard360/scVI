@@ -14,11 +14,12 @@ from scvi.dataset.data_loaders import DataLoaders
 from scvi.dataset.data_loaders import TrainTestDataLoaders, AlternateSemiSupervisedDataLoaders, \
     JointSemiSupervisedDataLoaders
 from scvi.metrics.classification import compute_accuracy, compute_accuracy_svc, compute_accuracy_rf, \
-    unsupervised_classification_accuracy, unsupervised_clustering_accuracy
-from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap, select_indices_evenly
+    unsupervised_classification_accuracy
+from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap
 from scvi.metrics.differential_expression import de_stats, de_cortex
 from scvi.metrics.imputation import imputation
 from scvi.metrics.log_likelihood import compute_log_likelihood
+from scvi.metrics.classification import unsupervised_clustering_accuracy
 from . import Inference, ClassifierInference
 
 plt.switch_backend('agg')
@@ -32,7 +33,7 @@ class VariationalInference(Inference):
         :gene_dataset: A gene_dataset instance like ``CortexDataset()``
         :train_size: The train size, either a float between 0 and 1 or and integer for the number of training samples
          to use Default: ``0.8``.
-        :**kwargs: Other keywords arguments from the general Inference class.
+        :\**kwargs: Other keywords arguments from the general Inference class.
 
     Examples:
         >>> gene_dataset = CortexDataset()
