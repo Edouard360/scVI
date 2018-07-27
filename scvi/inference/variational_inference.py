@@ -2,24 +2,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from sklearn.cluster import KMeans
-from sklearn.mixture import GaussianMixture as GMM
 from sklearn.manifold import TSNE
 from sklearn.metrics import adjusted_rand_score as ARI
 from sklearn.metrics import normalized_mutual_info_score as NMI
 from sklearn.metrics import silhouette_score
+from sklearn.mixture import GaussianMixture as GMM
 from torch.nn import functional as F
 
 from scvi.dataset import CortexDataset
 from scvi.dataset.data_loaders import DataLoaders
-from scvi.dataset.data_loaders import TrainTestDataLoaders, AlternateSemiSupervisedDataLoaders, \
-    JointSemiSupervisedDataLoaders
+from scvi.dataset.data_loaders import TrainTestDataLoaders, SemiSupervisedDataLoaders
 from scvi.metrics.classification import compute_accuracy, compute_accuracy_svc, compute_accuracy_rf, \
-    unsupervised_classification_accuracy
-from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap
+    unsupervised_classification_accuracy, compute_accuracy_tuple, compute_predictions
+from scvi.metrics.classification import unsupervised_clustering_accuracy
+from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap, select_indices_evenly
 from scvi.metrics.differential_expression import de_stats, de_cortex
 from scvi.metrics.imputation import imputation
 from scvi.metrics.log_likelihood import compute_log_likelihood
-from scvi.metrics.classification import unsupervised_clustering_accuracy
 from . import Inference, ClassifierInference
 
 plt.switch_backend('agg')
@@ -45,9 +44,9 @@ class VariationalInference(Inference):
     """
     default_metrics_to_monitor = ['ll']
 
-    def __init__(self, model, gene_dataset, train_size=0.8, use_cuda=True, **kwargs):
+    def __init__(self, model, gene_dataset, train_size=0.8, use_cuda=True, kl=None, **kwargs):
         super(VariationalInference, self).__init__(model, gene_dataset, use_cuda=use_cuda, **kwargs)
-        self.kl = None
+        self.kl = kl
         self.data_loaders = TrainTestDataLoaders(self.gene_dataset, train_size=train_size, use_cuda=self.use_cuda)
 
     def loss(self, tensors):
@@ -57,7 +56,7 @@ class VariationalInference(Inference):
         return loss
 
     def on_epoch_begin(self):
-        self.kl_weight = self.kl if self.kl is not None else min(1, self.epoch / self.n_epochs)
+        self.kl_weight = self.kl if self.kl is not None else min(1, self.epoch / self.n_epochs) if self.n_epochs else 0
 
     def ll(self, name, verbose=False):
         ll = compute_log_likelihood(self.model, self.data_loaders[name])
@@ -191,6 +190,7 @@ class VariationalInference(Inference):
                 axes[1].legend()
         plt.axis("off")
         plt.tight_layout()
+        plt.show()
         if save_name:
             plt.savefig(save_name)
 
@@ -201,12 +201,53 @@ class VariationalInference(Inference):
         rf_scores = compute_accuracy_rf(data_train, labels_train, data_test, labels_test, **kwargs)
         return svc_scores, rf_scores
 
+    def svc_rf(self, **kwargs):
+        raw_data = DataLoaders.raw_data(self.data_loaders['labelled'], self.data_loaders['unlabelled'])
+        (data_train, labels_train), (data_test, labels_test) = raw_data
+        svc_scores = compute_accuracy_svc(data_train, labels_train, data_test, labels_test, **kwargs)
+        rf_scores = compute_accuracy_rf(data_train, labels_train, data_test, labels_test, **kwargs)
+        return svc_scores, rf_scores
+
+    def benchmark_ll(self, name, last_n_values=10):
+        values = self.history['ll_' + name][-last_n_values:]
+        mean = np.mean(values)
+        std = 2 * np.sqrt(np.var(values)) / np.sqrt(last_n_values)
+        print("LL for %s is : %.4f +- %.4f" % (name, mean, std))
+        return mean
+
 
 class SemiSupervisedVariationalInference(VariationalInference):
     r"""The abstract SemiSupervisedVariationalInference class for the semi-supervised training of an autoencoder.
     This parent class is inherited to specify the different training schemes for semi-supervised learning
     """
     default_metrics_to_monitor = VariationalInference.default_metrics_to_monitor + ['accuracy']
+
+    def __init__(self, model, gene_dataset, n_labelled_samples_per_class=50, n_epochs_classifier=0,
+                 lr_classification=0.1, classification_ratio=100, **kwargs):
+        super(SemiSupervisedVariationalInference, self).__init__(model, gene_dataset, **kwargs)
+
+        self.n_epochs_classifier = n_epochs_classifier
+        self.lr_classification = lr_classification
+        self.classification_ratio = classification_ratio
+        self.data_loaders = SemiSupervisedDataLoaders(gene_dataset, n_labelled_samples_per_class,
+                                                      use_cuda=self.use_cuda)
+
+        self.classifier_inference = ClassifierInference(
+            model.classifier, gene_dataset, metrics_to_monitor=[], verbose=True, frequency=0,
+            sampling_model=self.model
+        )
+        self.classifier_inference.data_loaders['train'] = self.data_loaders['labelled']
+
+    def loss(self, tensors_all, tensors_labelled):
+        loss = super(SemiSupervisedVariationalInference, self).loss(tensors_all)
+        sample_batch, _, _, _, y = tensors_labelled
+        classification_loss = F.cross_entropy(self.model.classify(sample_batch), y.view(-1))
+        loss += classification_loss * self.classification_ratio
+        return loss
+
+    def on_epoch_end(self):
+        self.classifier_inference.train(self.n_epochs_classifier, lr=self.lr_classification)
+        return super(SemiSupervisedVariationalInference, self).on_epoch_end()
 
     def accuracy(self, name, verbose=False):
         acc = compute_accuracy(self.model, self.data_loaders[name])
@@ -216,7 +257,22 @@ class SemiSupervisedVariationalInference(VariationalInference):
 
     accuracy.mode = 'max'
 
-    def benchmark_accuracy(self, name, last_n_values=10):
+    def hierarchical_accuracy(self, name, verbose=False):
+
+        all_y, all_y_pred = compute_predictions(self.model, self.data_loaders[name])
+        acc = np.mean(all_y == all_y_pred)  # other metrics ? (cross entropy, ect...)
+
+        all_y_groups = np.array([self.model.labels_groups[y] for y in all_y])
+        all_y_pred_groups = np.array([self.model.labels_groups[y] for y in all_y_pred])
+        h_acc = np.mean(all_y_groups == all_y_pred_groups)  # other metrics ? (cross entropy, ect...)
+
+        if verbose:
+            print("Acc for %s is : %.4f\nH-Acc for %s is : %.4f\n" % (name, acc, name, h_acc))
+        return acc
+
+    accuracy.mode = 'max'
+
+    def benchmark_accuracy(self, name, last_n_values=10, verbose=False):
         values = self.history['accuracy_' + name][-last_n_values:]
         mean = np.mean(values)
         std = 2 * np.sqrt(np.var(values)) / np.sqrt(last_n_values)
@@ -230,6 +286,14 @@ class SemiSupervisedVariationalInference(VariationalInference):
         return uca
 
     unsupervised_accuracy.mode = 'max'
+
+    def granular_accuracy(self, name, verbose=False):
+        y, y_pred = compute_predictions(self.model, self.data_loaders[name])
+        tuple_accuracy = compute_accuracy_tuple(y, y_pred)
+        if verbose:
+            print(tuple_accuracy.accuracy_classes)
+            print(tuple_accuracy.count)
+        return tuple_accuracy
 
     def svc_rf(self, **kwargs):
         if 'train' in self.data_loaders:
@@ -260,23 +324,12 @@ class AlternateSemiSupervisedVariationalInference(SemiSupervisedVariationalInfer
         >>> infer.train(n_epochs=20, lr=1e-3)
     """
 
-    def __init__(self, model, gene_dataset, n_labelled_samples_per_class=50, n_epochs_classifier=1,
-                 lr_classification=0.1, **kwargs):
-        super(AlternateSemiSupervisedVariationalInference, self).__init__(model, gene_dataset, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super(AlternateSemiSupervisedVariationalInference, self).__init__(*args, **kwargs)
+        self.data_loaders.data_loaders_loop = ['all']
 
-        self.n_epochs_classifier = n_epochs_classifier
-        self.lr_classification = lr_classification
-        self.data_loaders = AlternateSemiSupervisedDataLoaders(gene_dataset, n_labelled_samples_per_class,
-                                                               use_cuda=self.use_cuda)
-
-        self.classifier_inference = ClassifierInference(
-            model.classifier, gene_dataset, metrics_to_monitor=[], verbose=True, frequency=0,
-            data_loaders=self.data_loaders.classifier_data_loaders(), sampling_model=self.model
-        )
-
-    def on_epoch_end(self):
-        self.classifier_inference.train(self.n_epochs_classifier, lr=self.lr_classification)
-        return super(AlternateSemiSupervisedVariationalInference, self).on_epoch_end()
+    def loss(self, tensors_all):
+        return VariationalInference.loss(self, tensors_all)
 
 
 class JointSemiSupervisedVariationalInference(SemiSupervisedVariationalInference):
@@ -297,18 +350,5 @@ class JointSemiSupervisedVariationalInference(SemiSupervisedVariationalInference
         >>> infer.train(n_epochs=20, lr=1e-3)
     """
 
-    def __init__(self, model, gene_dataset, n_labelled_samples_per_class=50, classification_ratio=100, **kwargs):
-        super(JointSemiSupervisedVariationalInference, self).__init__(model, gene_dataset, **kwargs)
-        self.data_loaders = JointSemiSupervisedDataLoaders(gene_dataset, n_labelled_samples_per_class,
-                                                           use_cuda=self.use_cuda)
-        self.classification_ratio = classification_ratio
-
-    def loss(self, tensors_all, tensors_labelled):
-        loss = super(JointSemiSupervisedVariationalInference, self).loss(tensors_all)
-        sample_batch, _, _, _, y = tensors_labelled
-        classification_loss = F.cross_entropy(self.model.classify(sample_batch), y.view(-1))
-        loss += classification_loss * self.classification_ratio
-        # sample_batch_z = self.model.sample_from_posterior_z(sample_batch)
-        # loss_mmd = mmd_objective(sample_batch_z, batch_index, self.gene_dataset.n_batches)
-        # print(loss_mmd.requires_grad) # + loss_mmd
-        return loss
+    def on_epoch_end(self):
+        pass

@@ -7,7 +7,7 @@ import rpy2.robjects.numpy2ri
 from rpy2.rinterface import RRuntimeWarning
 
 from scvi.dataset import GeneExpressionDataset, SemiSupervisedDataLoaders
-
+from scipy.sparse import csr_matrix
 Accuracy = namedtuple('Accuracy',
                       ['accuracy',
                        'unclassified_rate',
@@ -34,8 +34,11 @@ class SCMAP():
         ro.r["library"]("matrixStats")
 
     def create_dataset(self, path):
+        print("Reading rds")
         ro.r("sce<-readRDS('%s')" % path)
+        print("Extracting log counts")
         log_counts = ro.r("logcounts(sce)")
+        print("Transforming log count to counts")
         counts = (np.exp(log_counts * np.log(2)) - 1).T.astype(np.int)
         gene_symbols = ro.r("rowData(sce)$feature_symbol")
         labels = ro.r("colData(sce)$cell_type1")
@@ -46,7 +49,7 @@ class SCMAP():
         cell_types = list(np.unique(labels))
         labels = np.array([cell_types.index(l) for l in labels])
 
-        valid_idx = (counts.sum(axis=1) > 200).ravel()  # Filter bad quality cells
+        valid_idx = (counts.sum(axis=1) > 10).ravel()  # Filter bad quality cells
         counts = counts[valid_idx]
         labels = labels[valid_idx]
         gene_expression_dataset = GeneExpressionDataset(

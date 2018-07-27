@@ -2,7 +2,7 @@ import torch
 from torch.nn import functional as F
 
 from scvi.dataset.data_loaders import TrainTestDataLoaders
-from scvi.metrics.classification import compute_accuracy
+from scvi.metrics.classification import compute_accuracy, compute_predictions, compute_accuracy_tuple
 from . import Inference
 
 
@@ -44,6 +44,8 @@ class ClassifierInference(Inference):
         super(ClassifierInference, self).__init__(*args, use_cuda=use_cuda, **kwargs)
         if 'data_loaders' not in kwargs:
             self.data_loaders = TrainTestDataLoaders(self.gene_dataset, train_size=0.1)
+        else:
+            self.data_loaders = kwargs['data_loaders']
 
     def train(self, *args, **kargs):
         if hasattr(self.model, "update_parameters"):
@@ -54,14 +56,25 @@ class ClassifierInference(Inference):
 
     def loss(self, tensors_labelled):
         x, _, _, _, labels_train = tensors_labelled
-        x = self.sampling_model.sample_from_posterior_z(x) if self.sampling_model is not None else x
-        return F.cross_entropy(self.model(x), labels_train.view(-1))
+        if self.sampling_model is not None:
+            y = self.sampling_model.classify(x)
+            #qz_m, qz_v, z = self.sampling_model.sampl#z_encoder(torch.log(1 + x))  # use the stochastic version
+            #z = self.sampling_model.z_encoder.reparameterize(qz_m, qz_v/2)
+            #x = qz_m
+        else:
+            y = self.model(x)
+        return F.cross_entropy(y, labels_train.view(-1))
 
     def accuracy(self, name, verbose=False):
         model, cls = (self.sampling_model, self.model) if hasattr(self, 'sampling_model') else (self.model, None)
-        acc = compute_accuracy(model, self.data_loaders[name], classifier=cls)
+        y, y_pred = compute_predictions(model, self.data_loaders[name], classifier=cls)
+        tuple_accuracy = compute_accuracy_tuple(y, y_pred)
         if verbose:
-            print("Acc for %s is : %.4f" % (name, acc))
-        return acc
+            print(tuple_accuracy.accuracy_classes)
+            print(tuple_accuracy.count)
+        #acc = compute_accuracy(model, self.data_loaders[name], classifier=cls)
+        # if verbose:
+        #     print("Acc for %s is : %.4f" % (name, accuracy_tuple.))
+        return tuple_accuracy.unweighted
 
     accuracy.mode = 'max'

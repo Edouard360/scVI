@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from sklearn.model_selection._split import _validate_shuffle_split
 from torch.utils.data import DataLoader
-from torch.utils.data.sampler import SubsetRandomSampler, SequentialSampler, RandomSampler
+from torch.utils.data.sampler import SubsetRandomSampler, SequentialSampler, RandomSampler, WeightedRandomSampler
 
 
 class DataLoaderWrapper(DataLoader):
@@ -29,43 +29,50 @@ class DataLoaderWrapper(DataLoader):
         return DataLoaderWrapper(self.dataset, use_cuda=self.use_cuda, **new_data_loaders_kwargs)
 
 
+    def __radd__(self, other):
+        if other == 0:
+            return self
+        else:
+            return self.__add__(other)
+
+
 class DataLoaders:
     to_monitor = []
-    data_loaders_loop = []
+    loop = []
 
-    def __init__(self, gene_dataset, use_cuda=True, **data_loaders_kwargs):
+    def __init__(self, gene_dataset, use_cuda=True, **kwargs):
         """
         :param gene_dataset: a GeneExpressionDataset instance
-        :param data_loaders_kwargs: any additional keyword arguments to pass to the data_loaders at .init
+        :param kwargs: any additional keyword arguments to pass to the data_loaders at .init
         """
         self.gene_dataset = gene_dataset
         self.use_cuda = use_cuda
-        self.data_loaders_kwargs = {
+        self.kwargs = {
             "batch_size": 128,
             "pin_memory": use_cuda,
             "collate_fn": self.gene_dataset.collate_fn
         }
-        self.data_loaders_kwargs.update(data_loaders_kwargs)
-        self.data_loaders_dict = {'sequential': self()}
+        self.kwargs.update(kwargs)
+        self.dict = {'sequential': self()}
         self.infinite_random_sampler = cycle(self(shuffle=True))  # convenient for debugging - see .sample()
 
     def sample(self):
         return next(self.infinite_random_sampler)  # single batch random sampling for debugging purposes
 
     def __getitem__(self, item):
-        return self.data_loaders_dict[item]
+        return self.dict[item]
 
     def __setitem__(self, key, value):
-        self.data_loaders_dict[key] = value
+        self.dict[key] = value
 
     def __contains__(self, item):
-        return item in self.data_loaders_dict
+        return item in self.dict
 
     def __iter__(self):
-        data_loaders_loop = [self[name] for name in self.data_loaders_loop]
+        data_loaders_loop = [self[name] for name in self.loop]
         return zip(data_loaders_loop[0], *[cycle(data_loader) for data_loader in data_loaders_loop[1:]])
 
-    def __call__(self, shuffle=False, indices=None):
+    def __call__(self, shuffle=False, indices=None, weighted=False, scale=50):
         if indices is not None and shuffle:
             raise ValueError('indices is mutually exclusive with shuffle')
         if indices is None:
@@ -76,9 +83,20 @@ class DataLoaders:
         else:
             if hasattr(indices, 'dtype') and indices.dtype is np.dtype('bool'):
                 indices = np.where(indices)[0].ravel()
-            sampler = SubsetRandomSampler(indices)
+            if not weighted:
+                sampler = SubsetRandomSampler(indices)
+            else:
+                weights = np.zeros(len(self.gene_dataset))
+                labels = self.gene_dataset.labels[indices].ravel()
+                weights_ = np.zeros(labels.shape)
+                for l, c in zip(*np.unique(labels, return_counts=True)):
+                    weights_[labels == l] = 1 / c * np.log(1 + np.sqrt(c) / scale)
+                    #weights_[labels == l] = np.maximum((1 / c) * np.sqrt(np.log(1 + (c / scale) ** 2))
+                    #weights_[labels == l] = min(1/c, 1/50)
+                weights[indices] = weights_
+                sampler = WeightedRandomSampler(weights, num_samples=len(indices))
         return DataLoaderWrapper(self.gene_dataset, use_cuda=self.use_cuda, sampler=sampler,
-                                 **self.data_loaders_kwargs)
+                                 **self.kwargs)
 
     @staticmethod
     def raw_data(*data_loaders):
@@ -102,14 +120,14 @@ class DataLoaders:
 
 class TrainTestDataLoaders(DataLoaders):
     to_monitor = ['train', 'test']
-    data_loaders_loop = ['train']
+    loop = ['train']
 
-    def __init__(self, gene_dataset, train_size=0.1, test_size=None, seed=0, **data_loaders_kwargs):
+    def __init__(self, gene_dataset, train_size=0.1, test_size=None, seed=0, **kwargs):
         """
         :param train_size: float, int, or None (default is 0.1)
         :param test_size: float, int, or None (default is None)
         """
-        super(TrainTestDataLoaders, self).__init__(gene_dataset, **data_loaders_kwargs)
+        super(TrainTestDataLoaders, self).__init__(gene_dataset, **kwargs)
 
         n = len(self.gene_dataset)
         n_train, n_test = _validate_shuffle_split(n, test_size, train_size)
@@ -121,7 +139,7 @@ class TrainTestDataLoaders(DataLoaders):
         data_loader_train = self(indices=indices_train)
         data_loader_test = self(indices=indices_test)
 
-        self.data_loaders_dict.update({
+        self.dict.update({
             'train': data_loader_train,
             'test': data_loader_test
         })
@@ -129,12 +147,13 @@ class TrainTestDataLoaders(DataLoaders):
 
 class SemiSupervisedDataLoaders(DataLoaders):
     to_monitor = ['labelled', 'unlabelled']
+    loop = ['all', 'labelled']
 
-    def __init__(self, gene_dataset, n_labelled_samples_per_class=50, seed=0, use_cuda=True, **data_loaders_kwargs):
+    def __init__(self, gene_dataset, n_labelled_samples_per_class=50, seed=0, use_cuda=True, **kwargs):
         """
         :param n_labelled_samples_per_class: number of labelled samples per class
         """
-        super(SemiSupervisedDataLoaders, self).__init__(gene_dataset, use_cuda=use_cuda, **data_loaders_kwargs)
+        super(SemiSupervisedDataLoaders, self).__init__(gene_dataset, use_cuda=use_cuda, **kwargs)
 
         n_labelled_samples_per_class_array = [n_labelled_samples_per_class] * gene_dataset.n_labels
         labels = np.array(gene_dataset.labels).ravel()
@@ -159,24 +178,16 @@ class SemiSupervisedDataLoaders(DataLoaders):
         data_loader_labelled = self(indices=indices_labelled)
         data_loader_unlabelled = self(indices=indices_unlabelled)
 
-        self.data_loaders_dict.update({
+        self.dict.update({
             'all': data_loader_all,
             'labelled': data_loader_labelled,
             'unlabelled': data_loader_unlabelled,
         })
 
-
-class JointSemiSupervisedDataLoaders(SemiSupervisedDataLoaders):
-    data_loaders_loop = ['all', 'labelled']
-
-
-class AlternateSemiSupervisedDataLoaders(SemiSupervisedDataLoaders):
-    data_loaders_loop = ['all']
-
     def classifier_data_loaders(self):
-        data_loaders = DataLoaders(gene_dataset=self.gene_dataset, use_cuda=self.use_cuda, **self.data_loaders_kwargs)
-        data_loaders.data_loaders_loop = ['train']
-        data_loaders.data_loaders_dict.update({
+        data_loaders = DataLoaders(gene_dataset=self.gene_dataset, use_cuda=self.use_cuda, **self.kwargs)
+        data_loaders.loop = ['train']
+        data_loaders.dict.update({
             'train': self['labelled'],
             'test': self['unlabelled']
         })

@@ -7,25 +7,28 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.svm import SVC
 from sklearn.utils.linear_assignment_ import linear_assignment
 
-Accuracy = namedtuple('Accuracy', ['unweighted', 'weighted', 'worst', 'accuracy_classes'])
+Accuracy = namedtuple('Accuracy', ['unweighted', 'weighted', 'worst', 'accuracy_classes', 'count'])
 
 
 def compute_accuracy_tuple(y, y_pred):
     y = y.ravel()
-    n_labels = len(np.unique(y))
+    unique_labels, counts = np.unique(y, return_counts=True)
+    n_labels = len(unique_labels)
     classes_probabilities = []
     accuracy_classes = []
-    for cl in range(n_labels):
+    for cl in unique_labels:
         idx = y == cl
         classes_probabilities += [np.mean(idx)]
         accuracy_classes += [np.mean((y[idx] == y_pred[idx])) if classes_probabilities[-1] else 0]
         # This is also referred to as the "recall": p = n_true_positive / (n_false_negative + n_true_positive)
         # ( We could also compute the "precision": p = n_true_positive / (n_false_positive + n_true_positive) )
-        accuracy_named_tuple = Accuracy(
-            unweighted=np.dot(accuracy_classes, classes_probabilities),
-            weighted=np.mean(accuracy_classes),
-            worst=np.min(accuracy_classes),
-            accuracy_classes=accuracy_classes)
+    accuracy_named_tuple = Accuracy(
+        unweighted=np.dot(accuracy_classes, classes_probabilities),
+        weighted=np.mean(accuracy_classes),
+        worst=np.min(accuracy_classes),
+        accuracy_classes=accuracy_classes,
+        count=counts
+    )
     return accuracy_named_tuple
 
 
@@ -37,13 +40,13 @@ def compute_predictions(vae, data_loader, classifier=None):
         sample_batch, _, _, _, labels = tensors
         all_y += [labels.view(-1)]
 
-        if hasattr(vae, 'classify'):
-            y_pred = vae.classify(sample_batch).argmax(dim=-1)
-        elif classifier is not None:
+        if classifier is not None:
             # Then we use the specified classifier
             if vae is not None:
-                sample_batch, _, _ = vae.z_encoder(sample_batch)
+                sample_batch, _, _ = vae.z_encoder(torch.log(1 + sample_batch))
             y_pred = classifier(sample_batch).argmax(dim=-1)
+        elif hasattr(vae, 'classify'):
+            y_pred = vae.classify(sample_batch).argmax(dim=-1)
         all_y_pred += [y_pred]
 
     all_y_pred = np.array(torch.cat(all_y_pred))
@@ -94,7 +97,7 @@ def compute_accuracy_svc(data_train, labels_train, data_test, labels_test, unit_
             compute_accuracy_tuple(labels_test, y_pred_test))
 
 
-def compute_accuracy_rf(data_train, labels_train, data_test, labels_test, unit_test=False, verbose=0):
+def compute_accuracy_rf(data_train, labels_train, data_test, labels_test, unit_test=False, verbose=0, max_iter=-1):
     param_grid = {'max_depth': np.arange(3, 10), 'n_estimators': [10, 50, 100, 200]}
     if unit_test:
         param_grid = [{'max_depth': [3], 'n_estimators': [10]}]

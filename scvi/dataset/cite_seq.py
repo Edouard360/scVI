@@ -61,7 +61,7 @@ class CiteSeqDataset(GeneExpressionDataset):
         expression_data = expression.values[:, human_filter]
         gene_symbols = gene_symbols[human_filter]
 
-        self.gene_symbols = np.char.upper(
+        self.gene_symbols = self.gene_names = np.char.upper(
             np.array([name.split('_')[-1] if '_' in name else name for name in gene_symbols], dtype=np.str)
         )
 

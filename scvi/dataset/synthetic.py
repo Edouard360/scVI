@@ -14,3 +14,33 @@ class SyntheticDataset(GeneExpressionDataset):
             *GeneExpressionDataset.get_attributes_from_list(newdata, list_labels=labels),
             gene_names=np.arange(nb_genes).astype(np.str)
         )
+
+
+class SyntheticSimilar(GeneExpressionDataset):
+    def __init__(self):
+        cluster_1 = np.load("data/sim_batch/label1.npy").astype(np.int)
+        count_1 = np.load("data/sim_batch/count1.npy").T
+        cluster_1 = cluster_1 - 1
+
+        cluster_2 = np.load("data/sim_batch/label2.npy").astype(np.int)
+        count_2 = np.load("data/sim_batch/count2.npy").T
+        cluster_2 = cluster_2 - 1
+
+        super(SyntheticSimilar, self).__init__(
+            *GeneExpressionDataset.get_attributes_from_list([count_1, count_2], labels=[cluster_1, cluster_2])
+        )
+
+
+class SyntheticDifferent(GeneExpressionDataset):
+    def __init__(self):
+        cluster_1 = np.load("data/sim_batch/label.nonUMI.npy").astype(np.int)
+        count_1 = np.load("data/sim_batch/count.nonUMI.npy").T
+        cluster_1 = cluster_1 - 1
+
+        cluster_2 = np.load("data/sim_batch/label.UMI.npy").astype(np.int)
+        count_2 = np.load("data/sim_batch/count.UMI.npy").T
+        cluster_2 = cluster_2 - 1
+
+        super(SyntheticSimilar, self).__init__(
+            *GeneExpressionDataset.get_attributes_from_list([count_1, count_2], labels=[cluster_1, cluster_2])
+        )

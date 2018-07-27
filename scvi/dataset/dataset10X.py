@@ -14,27 +14,27 @@ from scipy.sparse import csr_matrix
 from scvi.dataset import GeneExpressionDataset
 
 available_datasets = {"1.1.0":
-                      ["frozen_pbmc_donor_a",
-                       "frozen_pbmc_donor_b",
-                       "frozen_pbmc_donor_c",
-                       "fresh_68k_pbmc_donor_a",
-                       "cd14_monocyte",
-                       "b_cells",
-                       "cd34",
-                       "cd56_nk",
-                       "cd4_t_helper",
-                       "regulatory_t",
-                       "naive_t",
-                       "memory_t",
-                       "cytotoxic_t",
-                       "naive_cytotoxic"
-                       ],
+                          ["frozen_pbmc_donor_a",
+                           "frozen_pbmc_donor_b",
+                           "frozen_pbmc_donor_c",
+                           "fresh_68k_pbmc_donor_a",
+                           "cd14_monocytes",
+                           "b_cells",
+                           "cd34",
+                           "cd56_nk",
+                           "cd4_t_helper",
+                           "regulatory_t",
+                           "naive_t",
+                           "memory_t",
+                           "cytotoxic_t",
+                           "naive_cytotoxic"
+                           ],
                       "2.1.0":
-                      ["pbmc8k",
-                       "pbmc4k",
-                       "t_3k",
-                       "t_4k",
-                       "neuron_9k"]}
+                          ["pbmc8k",
+                           "pbmc4k",
+                           "t_3k",
+                           "t_4k",
+                           "neuron_9k"]}
 
 to_groups = dict([(dataset_name, group)
                   for group, list_datasets in available_datasets.items()
@@ -61,7 +61,7 @@ class Dataset10X(GeneExpressionDataset):
 
     """
 
-    def __init__(self, filename, save_path='data/', type='filtered', new_n_genes=3000, dense=False):
+    def __init__(self, filename, save_path='data/', type='filtered', dense=False):
         group = to_groups[filename]
         self.url = ("http://cf.10xgenomics.com/samples/cell-exp/%s/%s/%s_%s_gene_bc_matrices.tar.gz" %
                     (group, filename, filename, type))

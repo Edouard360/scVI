@@ -84,7 +84,7 @@ class Inference:
             if params is None:
                 params = filter(lambda p: p.requires_grad, self.model.parameters())
 
-            optimizer = torch.optim.Adam(params, lr=lr, weight_decay=1e-6)
+            optimizer = torch.optim.Adam(params, lr=lr)#, weight_decay=1e-6)
             self.epoch = 0
             self.compute_metrics_time = 0
             self.n_epochs = n_epochs

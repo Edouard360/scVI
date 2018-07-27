@@ -58,6 +58,7 @@ def run_r_preprocessing():
     print("Preprocessing done")
 
 
+'''
 class PurePBMC(GeneExpressionDataset):
     def __init__(self, use_separate_batches=False):
         path = "data/mp/pure_full.svmlight"
@@ -89,6 +90,7 @@ class PurePBMC(GeneExpressionDataset):
                 *GeneExpressionDataset.get_attributes_from_matrix(sparse_matrix, labels=labels),
                 gene_names=gene_names, cell_types=cell_types
             )
+'''
 
 
 class DonorPBMC(GeneExpressionDataset):
@@ -115,3 +117,38 @@ class DonorPBMC(GeneExpressionDataset):
                 sparse_matrix,
                 labels=labels),
             gene_names=gene_names, cell_types=cell_types)
+
+
+def PurePBMC():
+    # cell_types = ["cd4_t_helper", "regulatory_t", "naive_t", "memory_t", "cytotoxic_t", "naive_cytotoxic"]
+    # cell_types_names = ["CD4+ T Helper2", "CD4+/CD25 T Reg", "CD4+/CD45RA+/CD25- Naive T", "CD4+/CD45RO+ Memory",
+    #                     "CD8+ Cytotoxic T", "CD8+/CD45RA+ Naive Cytotoxic"]
+    # datasets = []
+    # for cell_type, cell_type_name in zip(cell_types, cell_types_names):
+    #     dataset = Dataset10X(cell_type)
+    #     dataset.cell_types = np.array([cell_type_name])
+    #     datasets += [dataset]
+    #
+    # gene_dataset = GeneExpressionDataset.concat_datasets(datasets, shared_batches=True)
+    # gene_dataset.subsample_genes(subset_genes=(np.array(gene_dataset.X.sum(axis=0)) > 10).ravel())
+    # gene_dataset.export('10X/t_cells')
+    gene_dataset = GeneExpressionDataset.load_pickle("data/10X/t_cells.pickle")
+    return gene_dataset
+
+
+"""
+if subset == 'tcells':
+    cell_types = ["cd4_t_helper", "regulatory_t", "naive_t", "memory_t", "cytotoxic_t", "naive_cytotoxic"]
+    cell_types_names = ["CD4+ T Helper2", "CD4+/CD25 T Reg", "CD4+/CD45RA+/CD25- Naive T", "CD4+/CD45RO+ Memory",
+                        "CD8+ Cytotoxic T", "CD8+/CD45RA+ Naive Cytotoxic"]
+else:
+    cell_types = cell_types_names = \
+        ["cd14_monocyte", "b_cells", "cd34", "cd56_nk", "cd4_t_helper", "regulatory_t", "naive_t", "memory_t",
+         "cytotoxic_t", "naive_cytotoxic"]
+
+datasets = []
+for cell_type, cell_type_name in zip(cell_types, cell_types_names):
+    dataset = Dataset10X(cell_type)
+    dataset.cell_types = np.array([cell_type_name])
+    datasets += [dataset]
+"""

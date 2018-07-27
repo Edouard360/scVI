@@ -3,6 +3,8 @@
 """Handling datasets.
 For the moment, is initialized with a torch Tensor of size (n_cells, nb_genes)"""
 import os
+import pickle
+from collections import defaultdict
 
 import loompy
 import numpy as np
@@ -11,7 +13,7 @@ import torch
 import urllib.request
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset
-
+from sklearn.linear_model import LinearRegression
 
 class GeneExpressionDataset(Dataset):
     """Gene Expression dataset. It deals with:
@@ -88,6 +90,14 @@ class GeneExpressionDataset(Dataset):
         self.X = self.X[:, subset_genes]
         self.update_genes(subset_genes)
 
+    def subsample_genes_m3drop(self, new_n_genes):
+        log_m = np.log(np.mean(self.X,axis=0)+1e-5).reshape(-1,1)
+        log_d = np.log(np.sum((self.X==0),axis=0)+1e-5).reshape(-1,1)
+        lin_reg = LinearRegression()
+        lin_reg.fit(log_m, log_d)
+        subset_genes = np.argsort(np.abs(lin_reg.predict(log_m)-log_d).ravel())[::-1]
+        self.subsample_genes(subset_genes=subset_genes[:new_n_genes])
+
     def filter_genes(self, gene_names_ref, on='gene_names'):
         """
         Same as _filter_genes but overwrites on current dataset instead of returning data,
@@ -110,6 +120,10 @@ class GeneExpressionDataset(Dataset):
             cell_types_idx = np.array(cell_types, dtype=np.int64)
         return cell_types_idx
 
+    def squeeze(self):
+        relevant_cell_types = [int(i) for i in np.unique(self.labels)]
+        self.filter_cell_types(relevant_cell_types)
+
     def filter_cell_types(self, cell_types):
         """
         :param cell_types: numpy array of type np.int (indices) or np.str (cell-types names)
@@ -118,12 +132,13 @@ class GeneExpressionDataset(Dataset):
         cell_types_idx = self._cell_type_idx(cell_types)
         if hasattr(self, 'cell_types'):
             self.cell_types = self.cell_types[cell_types_idx]
-            print("Only keeping cell types: \n" + '\n'.join(list(self.cell_types)))
+            print("Only keeping cell types: \n" + ', '.join(list(self.cell_types)))
         idx_to_keep = []
         for idx in cell_types_idx:
             idx_to_keep += [np.where(self.labels == idx)[0]]
         self.update_cells(np.sort(np.concatenate(idx_to_keep)))
-        self.labels, self.n_labels = arrange_categories(self.labels, mapping_from=cell_types_idx)
+        self.labels, self.n_labels = arrange_categories(self.labels, mapping_from=cell_types_idx,
+                                                        mapping_to=range(len(self.cell_types)))
 
     def merge_cell_types(self, cell_types, new_cell_type_name):
         cell_types_idx = self._cell_type_idx(cell_types)
@@ -144,7 +159,7 @@ class GeneExpressionDataset(Dataset):
         elif hasattr(self, 'url') and hasattr(self, 'download_name'):
             GeneExpressionDataset._download(self.url, self.save_path, self.download_name)
 
-    def export(self, filename):
+    def export_loom(self, filename):
         col_attrs = {"BatchID": self.batch_indices, "ClusterID": self.labels}
         row_attrs = dict()
         file_attrs = dict()
@@ -153,6 +168,29 @@ class GeneExpressionDataset(Dataset):
         if hasattr(self, "cell_types"):
             file_attrs["CellTypes"] = self.cell_types
         loompy.create("data/" + filename, self.X.T, row_attrs, col_attrs, file_attrs=file_attrs)
+
+    def export_pickle(self, filename):
+        pickle_dictionary = {"batch_indices": self.batch_indices, "labels": self.labels}
+        if hasattr(self, "gene_names"):
+            pickle_dictionary["gene_names"] = self.gene_names
+        if hasattr(self, "cell_types"):
+            pickle_dictionary["cell_types"] = self.cell_types
+        pickle_dictionary["X"] = self.X
+        pickle.dump(pickle_dictionary, open(filename, 'wb'))
+
+    @staticmethod
+    def load_pickle(filename):
+        pickle_dictionary = defaultdict(lambda: None)
+        pickle_dictionary.update(pickle.load(open(filename, 'rb')))
+        return GeneExpressionDataset(
+            *GeneExpressionDataset.get_attributes_from_matrix(
+                pickle_dictionary["X"],
+                batch_index=pickle_dictionary["batch_indices"],
+                labels=pickle_dictionary["labels"]
+            ),
+            cell_types=pickle_dictionary["cell_types"],
+            gene_names=pickle_dictionary["gene_names"]
+        )
 
     @staticmethod
     def _download(url, save_path, download_name):
@@ -184,7 +222,7 @@ class GeneExpressionDataset(Dataset):
         log_counts = np.log(X.sum(axis=1))
         local_mean = (np.mean(log_counts) * np.ones((X.shape[0], 1))).astype(np.float32)
         local_var = (np.var(log_counts) * np.ones((X.shape[0], 1))).astype(np.float32)
-        batch_index = batch_index * np.ones((X.shape[0], 1))
+        batch_index = batch_index * np.ones((X.shape[0], 1)) if type(batch_index) is int else batch_index
         labels = labels.reshape(-1, 1) if labels is not None else np.zeros_like(batch_index)
         return X, local_mean, local_var, batch_index, labels
 
@@ -282,6 +320,13 @@ class GeneExpressionDataset(Dataset):
         subset_genes = np.array([gene_names.index(gene_name) for gene_name in gene_names_ref], dtype=np.int64)
         return gene_dataset.X[:, subset_genes], subset_genes
 
+    def __str__(self):
+        batch_count = np.zeros((self.n_batches, self.n_labels))
+        for j in range(self.n_labels):
+            for i, c in zip(*np.unique((self.labels[(self.batch_indices == j).ravel()]), return_counts=True)):
+                batch_count[j, i] = c
+        return batch_count.astype(np.int).__str__()
+
 
 def arrange_categories(original_categories, mapping_from=None, mapping_to=None):
     unique_categories = np.unique(original_categories)
@@ -290,8 +335,8 @@ def arrange_categories(original_categories, mapping_from=None, mapping_to=None):
         mapping_to = range(n_categories)
     if mapping_from is None:
         mapping_from = unique_categories
-    assert n_categories == len(mapping_from)
-    assert n_categories == len(mapping_to)
+    assert n_categories <= len(mapping_from)  # cell_type has no instance in dataset
+    assert len(mapping_to) == len(mapping_from)
 
     new_categories = np.copy(original_categories)
     for idx_from, idx_to in zip(mapping_from, mapping_to):
