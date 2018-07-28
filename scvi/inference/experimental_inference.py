@@ -78,32 +78,78 @@ class GlowInference(Inference):
         print(rf_scores[1])
 
 
-class GANInference(VariationalInference):
-    default_metrics_to_monitor = ['ll'] + ['entropy_batch_mixing']
+# class GANInference(VariationalInference):
+#     default_metrics_to_monitor = ['ll'] + ['entropy_batch_mixing']
+#
+#     def __init__(self, *args, scale=100, warm_up=0,  **kwargs):
+#         self.scale = scale
+#         self.warm_up = warm_up
+#         print("Scale is ", self.scale)
+#         print("Warm-up is ", self.warm_up)
+#         super(GANInference, self).__init__(*args, **kwargs)
+#
+#     def train(self, n_epochs=20, lr=1e-3, weight_decay=1e-4):
+#         self.GAN1 = Classifier(self.model.n_latent, n_labels=self.model.n_batch, n_layers=3)
+#         if self.use_cuda:
+#             self.GAN1.cuda()
+#         self.optimizer_GAN = torch.optim.Adam(filter(lambda p: p.requires_grad, self.GAN1.parameters()), lr=lr,
+#                                               weight_decay=weight_decay)
+#         super(VariationalInference, self).train(n_epochs=n_epochs, lr=lr, weight_decay=weight_decay)
+#
+#     def loss(self, tensors):
+#         if self.epoch > self.warm_up:  # Leave a warm-up
+#             sample_batch, _, _, batch_index, _ = tensors
+#             z = self.model.sample_from_posterior_z(sample_batch, batch_index)
+#             cls_loss = (self.scale * F.cross_entropy(self.GAN1(z), batch_index.view(-1)))  # Might rather change lr ?
+#             self.optimizer_GAN.zero_grad()
+#             cls_loss.backward(retain_graph=True)
+#             self.optimizer_GAN.step()
+#         else:
+#             cls_loss = 0
+#         return super(GANInference, self).loss(tensors) - cls_loss
+import types
 
-    def __init__(self, *args, scale=100, warm_up=0,  **kwargs):
-        self.scale = scale
-        self.warm_up = warm_up
-        print("Scale is ", self.scale)
-        print("Warm-up is ", self.warm_up)
-        super(GANInference, self).__init__(*args, **kwargs)
 
-    def train(self, n_epochs=20, lr=1e-3, weight_decay=1e-4):
-        self.GAN1 = Classifier(self.model.n_latent, n_labels=self.model.n_batch, n_layers=3)
-        if self.use_cuda:
-            self.GAN1.cuda()
-        self.optimizer_GAN = torch.optim.Adam(filter(lambda p: p.requires_grad, self.GAN1.parameters()), lr=lr,
-                                              weight_decay=weight_decay)
-        super(VariationalInference, self).train(n_epochs=n_epochs, lr=lr, weight_decay=weight_decay)
+def loss(self, tensors, *next_tensors):
+    if self.epoch > self.warm_up:  # Leave a warm-up
+        sample_batch, _, _, batch_index, _ = tensors
+        qm_z, _, _ = self.model.z_encoder(torch.log(1+sample_batch))
+        cls_loss = (self.scale * F.cross_entropy(self.GAN1(qm_z), batch_index.view(-1)))
+        self.optimizer_GAN.zero_grad()
+        cls_loss.backward(retain_graph=True)
+        self.optimizer_GAN.step()
+    else:
+        cls_loss = 0
+    return type(self).loss(self,tensors, *next_tensors) - cls_loss
 
-    def loss(self, tensors):
-        if self.epoch > self.warm_up:  # Leave a warm-up
-            sample_batch, _, _, batch_index, _ = tensors
-            z = self.model.sample_from_posterior_z(sample_batch, batch_index)
-            cls_loss = (self.scale * F.cross_entropy(self.GAN1(z), batch_index.view(-1)))  # Might rather change lr ?
-            self.optimizer_GAN.zero_grad()
-            cls_loss.backward(retain_graph=True)
-            self.optimizer_GAN.step()
-        else:
-            cls_loss = 0
-        return super(GANInference, self).loss(tensors) - cls_loss
+def train(self, n_epochs=20, lr=1e-3, weight_decay=1e-4):
+    self.GAN1 = Classifier(self.model.n_latent, n_labels=self.model.n_batch, n_layers=3)
+    if self.use_cuda:
+        self.GAN1.cuda()
+    self.optimizer_GAN = torch.optim.Adam(filter(lambda p: p.requires_grad, self.GAN1.parameters()), lr=lr,
+                                          weight_decay=weight_decay)
+    type(self).train(self, n_epochs=n_epochs, lr=lr)
+
+
+def gan_wrapper(infer, warm_up=30, scale=50):
+    infer.warm_up = warm_up
+    infer.scale = scale
+    infer.loss = types.MethodType(loss, infer)
+    infer.train = types.MethodType(train, infer)
+    return infer
+
+
+# class GANInference(VariationalInference):
+#     default_metrics_to_monitor = ['ll'] + ['entropy_batch_mixing']
+#
+#     def __init__(self, infer,  scale=100, warm_up=0):
+#         assert isinstance(infer, VariationalInference)
+#         self.infer = infer
+#         self.scale = scale
+#         self.warm_up = warm_up
+#         print("Scale is ", self.scale)
+#         print("Warm-up is ", self.warm_up)
+
+
+
+

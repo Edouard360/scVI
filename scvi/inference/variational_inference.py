@@ -20,7 +20,7 @@ from scvi.metrics.differential_expression import de_stats, de_cortex
 from scvi.metrics.imputation import imputation
 from scvi.metrics.log_likelihood import compute_log_likelihood
 from . import Inference, ClassifierInference
-
+from sklearn.neighbors import KNeighborsClassifier
 plt.switch_backend('agg')
 
 
@@ -124,7 +124,9 @@ class VariationalInference(Inference):
     differential_expression.mode = 'max'
 
     def entropy_batch_mixing(self, name, verbose=False, **kwargs):
-        if self.gene_dataset.n_batches == 2:
+        if self.gene_dataset.n_batches > 2:
+            print("ignoring %s, doing on sequential"%name)
+            name = 'sequential'
             latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])
             be_score = entropy_batch_mixing(latent, batch_indices, **kwargs)
             if verbose:
@@ -208,6 +210,17 @@ class VariationalInference(Inference):
         rf_scores = compute_accuracy_rf(data_train, labels_train, data_test, labels_test, **kwargs)
         return svc_scores, rf_scores
 
+    def nn_latentspace(self, name, verbose=True, **kwargs):
+        data_train, _, labels_train = get_latent(self.model, self.data_loaders['labelled'])
+        data_test, _, labels_test = get_latent(self.model, self.data_loaders['unlabelled'])
+        nn = KNeighborsClassifier()
+        nn.fit(data_train,labels_train)
+        score = nn.score(data_test, labels_test)
+
+        print("NN classifier score:", score)
+        print("NN classifier tuple:",compute_accuracy_tuple(labels_test, nn.predict(data_test)))
+        return score
+
     def benchmark_ll(self, name, last_n_values=10):
         values = self.history['ll_' + name][-last_n_values:]
         mean = np.mean(values)
@@ -223,9 +236,9 @@ class SemiSupervisedVariationalInference(VariationalInference):
     default_metrics_to_monitor = VariationalInference.default_metrics_to_monitor + ['accuracy']
 
     def __init__(self, model, gene_dataset, n_labelled_samples_per_class=50, n_epochs_classifier=0,
-                 lr_classification=0.1, classification_ratio=100, **kwargs):
+                 lr_classification=0.1, classification_ratio=100, labels_groups=None, **kwargs):
         super(SemiSupervisedVariationalInference, self).__init__(model, gene_dataset, **kwargs)
-
+        self.labels_groups = labels_groups
         self.n_epochs_classifier = n_epochs_classifier
         self.lr_classification = lr_classification
         self.classification_ratio = classification_ratio
@@ -293,6 +306,7 @@ class SemiSupervisedVariationalInference(VariationalInference):
         if verbose:
             print(tuple_accuracy.accuracy_classes)
             print(tuple_accuracy.count)
+            print("Unweighted : ",tuple_accuracy.unweighted)
         return tuple_accuracy
 
     def svc_rf(self, **kwargs):
@@ -349,6 +363,6 @@ class JointSemiSupervisedVariationalInference(SemiSupervisedVariationalInference
         >>> infer = JointSemiSupervisedVariationalInference(gene_dataset, svaec, n_labelled_samples_per_class=10)
         >>> infer.train(n_epochs=20, lr=1e-3)
     """
-
-    def on_epoch_end(self):
-        pass
+    def __init__(self, *args, **kwargs):
+        kwargs['n_epochs_classifier'] = 0
+        super(JointSemiSupervisedVariationalInference, self).__init__(*args, **kwargs)
