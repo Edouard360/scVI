@@ -3,7 +3,7 @@ from .cortex import CortexDataset
 from .dataset import GeneExpressionDataset
 from .synthetic import SyntheticDataset, SyntheticSimilar
 from .cite_seq import CiteSeqDataset, CbmcDataset
-from .pbmc import PbmcDataset
+from .pbmc import PbmcDataset, PurifiedPBMCDataset
 from .hemato import HematoDataset
 from .loom import LoomDataset, RetinaDataset
 from .dataset10X import Dataset10X, BrainSmallDataset
@@ -32,6 +32,7 @@ __all__ = ['SyntheticDataset',
            'SmfishDataset',
            'BreastCancerDataset',
            'MouseOBDataset',
+           'PurifiedPBMCDataset',
            'PurePBMC',
            'DonorPBMC',
            'DataLoaders',

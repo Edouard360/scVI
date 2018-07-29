@@ -8,15 +8,32 @@ from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler, SequentialSampler, RandomSampler, WeightedRandomSampler
 
 
+class SequentialSubsetSampler(SubsetRandomSampler):
+    def __init__(self, indices):
+        self.indices = np.sort(indices)
+
+    def __iter__(self):
+        return iter(self.indices)
+
+
 class DataLoaderWrapper(DataLoader):
-    def __init__(self, dataset, use_cuda=True, **data_loaders_kwargs):
+    def __init__(self, dataset, use_cuda=True, **kwargs):
+        self.kwargs = kwargs
         self.use_cuda = use_cuda and torch.cuda.is_available()
-        self.data_loaders_kwargs = data_loaders_kwargs
-        super(DataLoaderWrapper, self).__init__(dataset, **data_loaders_kwargs)
+        super(DataLoaderWrapper, self).__init__(dataset, **kwargs)
 
     def to_cuda(self, tensors):
         tensors = (tensors[0].type(torch.float32),) + tuple(tensors[1:])
         return [t.cuda(async=self.use_cuda) if self.use_cuda else t for t in tensors]
+
+    def sequential(self, batch_size=128):
+        kwargs = copy.copy(self.kwargs)
+        kwargs['batch_size'] = batch_size
+        if hasattr(self, 'sampler') and hasattr(self.sampler, 'indices'):
+            kwargs['sampler'] = SequentialSubsetSampler(indices=self.sampler.indices)
+        else:
+            kwargs['sampler'] = SequentialSampler(self.dataset)
+        return DataLoaderWrapper(self.dataset, use_cuda=self.use_cuda, **kwargs)
 
     def __iter__(self):
         return map(self.to_cuda, super(DataLoaderWrapper, self).__iter__())
@@ -183,6 +200,14 @@ class SemiSupervisedDataLoaders(DataLoaders):
             'labelled': data_loader_labelled,
             'unlabelled': data_loader_unlabelled,
         })
+
+
+class JointSemiSupervisedDataLoaders(SemiSupervisedDataLoaders):
+    loop = ['all', 'labelled']
+
+
+class AlternateSemiSupervisedDataLoaders(SemiSupervisedDataLoaders):
+    loop = ['all']
 
     def classifier_data_loaders(self):
         data_loaders = DataLoaders(gene_dataset=self.gene_dataset, use_cuda=self.use_cuda, **self.kwargs)

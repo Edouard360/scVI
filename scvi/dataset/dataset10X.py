@@ -5,36 +5,35 @@
 # either filtered or raw data
 import os
 import tarfile
-
-import numpy as np
 import pandas as pd
+import numpy as np
 from scipy import io
 from scipy.sparse import csr_matrix
 
 from scvi.dataset import GeneExpressionDataset
 
 available_datasets = {"1.1.0":
-                          ["frozen_pbmc_donor_a",
-                           "frozen_pbmc_donor_b",
-                           "frozen_pbmc_donor_c",
-                           "fresh_68k_pbmc_donor_a",
-                           "cd14_monocytes",
-                           "b_cells",
-                           "cd34",
-                           "cd56_nk",
-                           "cd4_t_helper",
-                           "regulatory_t",
-                           "naive_t",
-                           "memory_t",
-                           "cytotoxic_t",
-                           "naive_cytotoxic"
-                           ],
+                      ["frozen_pbmc_donor_a",
+                       "frozen_pbmc_donor_b",
+                       "frozen_pbmc_donor_c",
+                       "fresh_68k_pbmc_donor_a",
+                       "cd14_monocytes",
+                       "b_cells",
+                       "cd34",
+                       "cd56_nk",
+                       "cd4_t_helper",
+                       "regulatory_t",
+                       "naive_t",
+                       "memory_t",
+                       "cytotoxic_t",
+                       "naive_cytotoxic"
+                       ],
                       "2.1.0":
-                          ["pbmc8k",
-                           "pbmc4k",
-                           "t_3k",
-                           "t_4k",
-                           "neuron_9k"]}
+                      ["pbmc8k",
+                       "pbmc4k",
+                       "t_3k",
+                       "t_4k",
+                       "neuron_9k"]}
 
 to_groups = dict([(dataset_name, group)
                   for group, list_datasets in available_datasets.items()
@@ -60,7 +59,6 @@ class Dataset10X(GeneExpressionDataset):
         http://cf.10xgenomics.com/
 
     """
-
     def __init__(self, filename, save_path='data/', type='filtered', dense=False):
         group = to_groups[filename]
         self.url = ("http://cf.10xgenomics.com/samples/cell-exp/%s/%s/%s_%s_gene_bc_matrices.tar.gz" %
@@ -116,7 +114,6 @@ class BrainSmallDataset(Dataset10X):
         https://support.10xgenomics.com/single-cell-gene-expression/datasets
 
     """
-
     def __init__(self, save_path='data/'):
         super(BrainSmallDataset, self).__init__(filename="neuron_9k",
                                                 save_path=save_path)
