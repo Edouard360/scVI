@@ -1,3 +1,3 @@
-from .scmap import SCMAP
+from .classification import SCMAP
 
 __all__ = ['SCMAP']

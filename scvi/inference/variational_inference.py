@@ -14,9 +14,9 @@ from scvi.dataset.data_loaders import DataLoaders
 from scvi.dataset.data_loaders import TrainTestDataLoaders, SemiSupervisedDataLoaders
 from scvi.metrics.classification import compute_accuracy, compute_accuracy_svc, compute_accuracy_rf, \
     unsupervised_classification_accuracy, compute_predictions
-from scvi.metrics.classification import unsupervised_clustering_accuracy
-from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap
+from scvi.metrics.classification import unsupervised_clustering_accuracy,\
     unsupervised_classification_accuracy, compute_accuracy_tuple, compute_predictions
+from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap
 from scvi.metrics.classification import unsupervised_clustering_accuracy
 from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap, select_indices_evenly
 from scvi.metrics.differential_expression import de_stats, de_cortex
@@ -138,7 +138,7 @@ class VariationalInference(Inference):
     differential_expression.mode = 'max'
 
     def entropy_batch_mixing(self, name, verbose=False, **kwargs):
-        if self.gene_dataset.n_batches > 2:
+        if self.gene_dataset.n_batches >= 2:
             print("ignoring %s, doing on sequential"%name)
             name = 'sequential'
             latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])

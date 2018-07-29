@@ -41,9 +41,9 @@ class DataLoaderWrapper(DataLoader):
     def __add__(self, other):
         assert hasattr(self.sampler, "indices") and hasattr(other.sampler, "indices")
         new_indices = np.sort(np.concatenate((self.sampler.indices, other.sampler.indices)))
-        new_data_loaders_kwargs = copy.copy(self.data_loaders_kwargs)
-        new_data_loaders_kwargs["sampler"] = SubsetRandomSampler(new_indices)
-        return DataLoaderWrapper(self.dataset, use_cuda=self.use_cuda, **new_data_loaders_kwargs)
+        new_kwargs = copy.copy(self.kwargs)
+        new_kwargs["sampler"] = SubsetRandomSampler(new_indices)
+        return DataLoaderWrapper(self.dataset, use_cuda=self.use_cuda, **new_kwargs)
 
 
     def __radd__(self, other):
@@ -100,17 +100,20 @@ class DataLoaders:
         else:
             if hasattr(indices, 'dtype') and indices.dtype is np.dtype('bool'):
                 indices = np.where(indices)[0].ravel()
-            if not weighted:
+            if weighted is False:
                 sampler = SubsetRandomSampler(indices)
             else:
-                weights = np.zeros(len(self.gene_dataset))
-                labels = self.gene_dataset.labels[indices].ravel()
-                weights_ = np.zeros(labels.shape)
-                for l, c in zip(*np.unique(labels, return_counts=True)):
-                    weights_[labels == l] = 1 / c * np.log(1 + np.sqrt(c) / scale)
-                    #weights_[labels == l] = np.maximum((1 / c) * np.sqrt(np.log(1 + (c / scale) ** 2))
-                    #weights_[labels == l] = min(1/c, 1/50)
-                weights[indices] = weights_
+                if weighted is True:
+                    weights = np.zeros(len(self.gene_dataset))
+                    labels = self.gene_dataset.labels[indices].ravel()
+                    weights_ = np.zeros(labels.shape)
+                    for l, c in zip(*np.unique(labels, return_counts=True)):
+                        #weights_[labels == l] = 1 / c * np.log(1 + np.sqrt(c) / scale)
+                        #weights_[labels == l] = np.maximum((1 / c) * np.sqrt(np.log(1 + (c / scale) ** 2))
+                        weights_[labels == l] = min(1/c, 1/50)
+                    weights[indices] = weights_
+                else:
+                    weights = weighted
                 sampler = WeightedRandomSampler(weights, num_samples=len(indices))
         return DataLoaderWrapper(self.gene_dataset, use_cuda=self.use_cuda, sampler=sampler,
                                  **self.kwargs)

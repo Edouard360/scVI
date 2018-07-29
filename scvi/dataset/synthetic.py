@@ -12,7 +12,7 @@ class SyntheticDataset(GeneExpressionDataset):
         labels = np.random.randint(0, n_labels, size=(n_batches, batch_size, 1))
         super(SyntheticDataset, self).__init__(
             *GeneExpressionDataset.get_attributes_from_list(newdata, list_labels=labels),
-            gene_names=np.arange(nb_genes).astype(np.str)
+            gene_names=np.arange(nb_genes).astype(np.str), cell_types=np.arange(n_labels).astype(np.str)
         )
 
 

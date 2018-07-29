@@ -7,7 +7,7 @@ from .variational_inference import (
     JointSemiSupervisedVariationalInference
 )
 from .experimental_inference import adversarial_wrapper, mmd_wrapper
-from .experimental_inference import InfoCatInference, VadeInference, GlowInference, gan_wrapper
+from .experimental_inference import InfoCatInference, VadeInference, GlowInference
 
 __all__ = ['Inference',
            'ClassifierInference',
@@ -20,5 +20,4 @@ __all__ = ['Inference',
            'JointSemiSupervisedVariationalInference',
            'InfoCatInference',
            'VadeInference',
-           'GlowInference',
-           'gan_wrapper']
+           'GlowInference']

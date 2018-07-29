@@ -11,9 +11,10 @@ import numpy as np
 import scipy.sparse as sp_sparse
 import torch
 import urllib.request
+from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset
-from sklearn.linear_model import LinearRegression
+
 
 class GeneExpressionDataset(Dataset):
     """Gene Expression dataset. It deals with:
@@ -57,9 +58,9 @@ class GeneExpressionDataset(Dataset):
         indexes = np.array(batch)
         X = torch.FloatTensor(self.X[indexes]) if self.dense else torch.FloatTensor(self.X[indexes].toarray())
         return X, torch.FloatTensor(self.local_means[indexes]), \
-            torch.FloatTensor(self.local_vars[indexes]), \
-            torch.LongTensor(self.batch_indices[indexes]), \
-            torch.LongTensor(self.labels[indexes])
+               torch.FloatTensor(self.local_vars[indexes]), \
+               torch.LongTensor(self.batch_indices[indexes]), \
+               torch.LongTensor(self.labels[indexes])
 
     def update_genes(self, subset_genes):
         if hasattr(self, 'gene_names'):
@@ -77,7 +78,7 @@ class GeneExpressionDataset(Dataset):
     def subsample_genes(self, new_n_genes=None, subset_genes=None):
         n_cells, n_genes = self.X.shape
         if subset_genes is None and \
-                (not hasattr(self, 'gene_names') or new_n_genes is False or new_n_genes >= n_genes):
+            (not hasattr(self, 'gene_names') or new_n_genes is False or new_n_genes >= n_genes):
             return None  # Do nothing if subsample more genes than total number of genes
         if subset_genes is None:
             print("Downsampling from %i to %i genes" % (n_genes, new_n_genes))
@@ -91,11 +92,11 @@ class GeneExpressionDataset(Dataset):
         self.update_genes(subset_genes)
 
     def subsample_genes_m3drop(self, new_n_genes):
-        log_m = np.log(np.mean(self.X,axis=0)+1e-5).reshape(-1,1)
-        log_d = np.log(np.sum((self.X==0),axis=0)+1e-5).reshape(-1,1)
+        log_m = np.log(np.mean(self.X, axis=0) + 1e-5).reshape(-1, 1)
+        log_d = np.log(np.sum((self.X == 0), axis=0) + 1e-5).reshape(-1, 1)
         lin_reg = LinearRegression()
         lin_reg.fit(log_m, log_d)
-        subset_genes = np.argsort(np.abs(lin_reg.predict(log_m)-log_d).ravel())[::-1]
+        subset_genes = np.argsort(np.abs(lin_reg.predict(log_m) - log_d).ravel())[::-1]
         self.subsample_genes(subset_genes=subset_genes[:new_n_genes])
 
     def filter_genes(self, gene_names_ref, on='gene_names'):
@@ -151,6 +152,17 @@ class GeneExpressionDataset(Dataset):
                 new_cell_types.remove(cell_type)
             new_cell_types.append(new_cell_type_name)
             self.cell_types = np.array(new_cell_types)
+
+    def assign_labels(self, labels):
+        labels = np.array(labels)
+        assert len(labels) == len(self.X)
+        if labels.dtype is np.dtype('str'):
+            self.cell_types = list(np.unique(labels))
+            self.labels = np.array([self.cell_types.index(cell_type) for cell_type in self.cell_types])
+            self.cell_types = np.array(self.cell_types)
+        else:
+            self.labels = labels
+        self.labels = self.labels.reshape(-1, 1)
 
     def download(self):
         if hasattr(self, 'urls') and hasattr(self, 'download_names'):

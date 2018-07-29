@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from sklearn.datasets import load_svmlight_file
 
+from scvi.dataset import Dataset10X
 from .dataset import GeneExpressionDataset
 
 # In this paper, they prioritize label n. 2 for better visualization (D4+/CD45RA+/CD25- Naive T)
@@ -120,18 +121,18 @@ class DonorPBMC(GeneExpressionDataset):
 
 
 def PurePBMC():
-    # cell_types = ["cd4_t_helper", "regulatory_t", "naive_t", "memory_t", "cytotoxic_t", "naive_cytotoxic"]
-    # cell_types_names = ["CD4+ T Helper2", "CD4+/CD25 T Reg", "CD4+/CD45RA+/CD25- Naive T", "CD4+/CD45RO+ Memory",
-    #                     "CD8+ Cytotoxic T", "CD8+/CD45RA+ Naive Cytotoxic"]
-    # datasets = []
-    # for cell_type, cell_type_name in zip(cell_types, cell_types_names):
-    #     dataset = Dataset10X(cell_type)
-    #     dataset.cell_types = np.array([cell_type_name])
-    #     datasets += [dataset]
-    #
-    # gene_dataset = GeneExpressionDataset.concat_datasets(datasets, shared_batches=True)
-    # gene_dataset.subsample_genes(subset_genes=(np.array(gene_dataset.X.sum(axis=0)) > 10).ravel())
-    # gene_dataset.export('10X/t_cells')
+    cell_types = ["cd4_t_helper", "regulatory_t", "naive_t", "memory_t", "cytotoxic_t", "naive_cytotoxic"]
+    cell_types_names = ["CD4+ T Helper2", "CD4+/CD25 T Reg", "CD4+/CD45RA+/CD25- Naive T", "CD4+/CD45RO+ Memory",
+                        "CD8+ Cytotoxic T", "CD8+/CD45RA+ Naive Cytotoxic"]
+    datasets = []
+    for cell_type, cell_type_name in zip(cell_types, cell_types_names):
+        dataset = Dataset10X(cell_type)
+        dataset.cell_types = np.array([cell_type_name])
+        datasets += [dataset]
+
+    gene_dataset = GeneExpressionDataset.concat_datasets(datasets, shared_batches=True)
+    gene_dataset.subsample_genes(subset_genes=(np.array(gene_dataset.X.sum(axis=0)) > 10).ravel())
+    gene_dataset.export('10X/t_cells')
     gene_dataset = GeneExpressionDataset.load_pickle("data/10X/t_cells.pickle")
     return gene_dataset
 

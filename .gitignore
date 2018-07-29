@@ -114,8 +114,6 @@ ENV/
 # Personal
 tests/data/
 single-cell-3prime-paper/
-examples/experiments/
-examples/help/
-examples/scripts/
+examples/
 data
 run_main.py

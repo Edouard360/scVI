@@ -40,7 +40,11 @@ dataset1 = assign_label(cellid, geneid, labels_map, count, cell_type, seurat)
 count, geneid, cellid = get_matrix_from_dir('cite')
 count = count.T.tocsr()
 seurat = np.genfromtxt('../cite/cite.seurat.labels', dtype='str', delimiter=',')
+
 cellid = np.asarray([x.split('-')[0] for x in cellid])
+label_dict = dict(seurat[1:,5],seurat[1:,4])
+labels = [label_dict[id_] for id_ in cellid]
+
 labels_map = [0, 0, 1, 2, 3, 4, 5, 6]
 labels = seurat[1:, 4]
 cell_type = ["CD4+ T Helper2", "CD56+ NK", "CD14+ Monocyte", "CD19+ B", "CD8+ Cytotoxic T", "FCGR3A Monocyte", "na"]

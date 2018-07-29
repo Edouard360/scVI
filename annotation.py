@@ -1,19 +1,35 @@
 
+from scvi.benchmarks import SCMAP
+
+scmap = SCMAP()
+# dataset_xin = scmap.create_dataset("../scmap/xin/xin.rds")
+
+# dataset_xin.export_loom('xin.loom')
+# cell_types_xin = list(filter(lambda p: ".contaminated" not in p, dataset_xin.cell_types))
+# dataset_xin.filter_cell_types(cell_types_xin)
+#
+# dataset_segerstolpe = scmap.create_dataset("../scmap/segerstolpe/segerstolpe.rds")
+#
+# dataset_segerstolpe.export_loom('segerstolpe.loom')
+# # cell_types_segerstolpe = list(filter(lambda p: p != "not applicable", dataset_segerstolpe.cell_types))
+# # dataset_segerstolpe.filter_cell_types(cell_types_segerstolpe)
+#
+# dataset_muraro = scmap.create_dataset("../scmap/muraro/muraro.rds")
+# dataset_muraro.export_loom('muraro.loom')
+# dataset_baron = scmap.create_dataset("../scmap/baron-human/baron-human.rds")
+# dataset_baron.export_loom('baron.loom')
+
+
+# dataset_shekhar = scmap.create_dataset("../scmap/shekhar/shekhar.rds")
+# dataset_shekhar.export_loom('shekhar.loom')
+#
+# dataset_macosko = scmap.create_dataset("../scmap/macosko/macosko.rds")
+# dataset_macosko.export_loom('macosko.loom')
+
+# dataset = GeneExpressionDataset.concat_datasets(dataset_xin, dataset_segerstolpe, dataset_muraro, dataset_baron,
+#                                                 on='gene_symbols')
+# dataset.subsample_genes(subset_genes=(dataset.X.max(axis=0) <= 3000).ravel())
 '''
-dataset_xin = scmap.create_dataset("../scmap/xin/xin.rds")
-cell_types_xin = list(filter(lambda p: ".contaminated" not in p, dataset_xin.cell_types))
-dataset_xin.filter_cell_types(cell_types_xin)
-
-dataset_segerstolpe = scmap.create_dataset("../scmap/segerstolpe/segerstolpe.rds")
-cell_types_segerstolpe = list(filter(lambda p: p != "not applicable", dataset_segerstolpe.cell_types))
-dataset_segerstolpe.filter_cell_types(cell_types_segerstolpe)
-
-dataset_muraro = scmap.create_dataset("../scmap/muraro/muraro.rds")
-dataset_baron = scmap.create_dataset("../scmap/baron-human/baron-human.rds")
-
-dataset = GeneExpressionDataset.concat_datasets(dataset_xin, dataset_segerstolpe, dataset_muraro, dataset_baron,
-                                                on='gene_symbols')
-dataset.subsample_genes(subset_genes=(dataset.X.max(axis=0) <= 3000).ravel())
 '''
 #dataset.update_cells(indices=.ravel())
 #dataset.update_cells(subset_cells=((dataset.batch_indices == 2)+(dataset.batch_indices == 1)).ravel())
@@ -35,19 +51,24 @@ import copy
 # # TODO 0 a) : 2 datasets - they suck, we should filter them
 from scvi.models.classifier import Classifier
 
-scmap = SCMAP()
+# scmap = SCMAP()
+#dataset_=SyntheticDataset(n_batches=3)
 dataset_ = GeneExpressionDataset.load_pickle('../scmap/d4-all.pickle')
+#ataset_ = GeneExpressionDataset.load_pickle('../scmap/shekhar-macosko-2.pickle')
+#dataset_ = SyntheticDataset(batch_size=1000, n_batches=3)
 
 index={'xin':0, 'segerstolpe':1,'muraro':2,'baron':3 }
+#index={'shekhar':0, 'macosko':1}
 
 sources_target = [
     ('segerstolpe', 'muraro'),
-    ('muraro', 'segerstolpe'),
-    (['baron-human', 'muraro'], 'segerstolpe'),
-    ('muraro', 'segerstolpe'),
-    ('segerstolpe', 'xin'),
-    ('xin', 'segerstolpe'),
-    (['xin','segerstolpe'], 'muraro')
+    # ('muraro', 'segerstolpe'),
+    # (['baron-human', 'muraro'], 'segerstolpe'),
+    # ('muraro', 'segerstolpe'),
+    # ('segerstolpe', 'xin'),
+    # ('xin', 'segerstolpe'),
+    # (['xin','segerstolpe'], 'muraro')
+    #('shekhar', 'macosko')
 ]
 import numpy as np
 for sources, target in sources_target:
@@ -69,58 +90,74 @@ for sources, target in sources_target:
 
     # (X_train, labels_train), = data_loaders.raw_data(data_loaders['labelled'])
     # (X_test, labels_test), = data_loaders.raw_data(data_loaders['unlabelled'])
+    ## X_train = X_train.A
+    ## X_test = X_test.A
     # print(X_train.shape)
     # print(labels_train.shape)
     # print(X_test.shape)
     # print(labels_test.shape)
-    #
+
     # scmap.create_sce_object(X_train, dataset.gene_names, labels_train, 'd_train')
     # scmap.create_sce_object(X_test, dataset.gene_names, labels_test, 'd_test')
-    #
-    # labels_pred = scmap.scmap_cluster(
-    #     'd_train', 'd_test', threshold=0, n_features=500
-    # )
-    # print("Accuracy result scmap_cluster:", scmap.accuracy_tuple(labels_test, labels_pred))
+    # for n_features in [200,500,1000]:
+    #     labels_pred = scmap.scmap_cluster(
+    #         'd_train', 'd_test', threshold=0, n_features=n_features
+    #     )
+    #     print("Accuracy result scmap_cluster:", scmap.accuracy_tuple(labels_test, labels_pred))
     #
     # labels_pred = scmap.scmap_cell(
-    #     'd_train', 'd_test', w=5, threshold=0, n_features=500
+    #     'd_train', 'd_test', w=5, threshold=0, n_features=100
     # )
     # print("Accuracy result scmap_cell:", scmap.accuracy_tuple(labels_test, labels_pred))
-    #
-    # # Optional: weighting the classification accuracy.
-    # data_loaders['labelled'] = data_loaders(indices=data_loaders['labelled'].sampler.indices, weighted=True)
 
-    svaec = SVAEC(dataset.nb_genes, dataset.n_batches, dataset.n_labels, n_layers=3, dropout_rate=0.2,
-                  classifier_parameters={'n_layers':2, 'dropout_rate':0.5})
+    # # Optional: weighting the classification accuracy.
+    data_loaders['labelled_weighted'] = data_loaders(indices=data_loaders['labelled'].sampler.indices, weighted=True)
+    indices_unlabelled = data_loaders['unlabelled'].sampler.indices
+
+    weights = np.array(data_loaders['labelled_weighted'].sampler.weights).astype(np.float32)
+    weights[indices_unlabelled] = 1/len(indices_unlabelled)
+    data_loaders['all_weighted'] = data_loaders(weighted=weights)
+
+    data_loaders.loop = ['all','labelled_weighted']#['all_weighted', 'labelled_weighted']#'] # maybe labelled_weighted ?
+
+    svaec = SVAEC(dataset.nb_genes, dataset.n_batches, dataset.n_labels, n_layers=1, dropout_rate=0.1,
+                  classifier_parameters={'n_layers':2, 'dropout_rate':0.1})
     # cls = Classifier(dataset.nb_genes, n_labels = dataset.n_labels)
     # infer = ClassifierInference(cls, dataset, verbose=True, frequency=50)
-    infer = SemiSupervisedVariationalInference(svaec, dataset, frequency=200, verbose=True, classification_ratio=50,
+    infer = SemiSupervisedVariationalInference(svaec, dataset, frequency=100, verbose=True, classification_ratio=50,
                                                n_epochs_classifier=1, lr_classification=1e-3)
+    # infer = VariationalInference(vae, dataset, frequency=10, verbose=True)#, classification_ratio=50,
+    #                                            # n_epochs_classifier=1, lr_classification=1e-3)
 
+
+    #infer = mmd_wrapper(infer, warm_up=0, scale=500)#gan_wrapper(infer, warm_up=200)
 
     infer.data_loaders = data_loaders
 
-    infer.metrics_to_monitor += ['granular_accuracy']
-    infer.classifier_inference.data_loaders['train'] = data_loaders['labelled']
-    infer.classifier_inference.data_loaders.loop = ['train']
-    infer.data_loaders['train'] = data_loaders['labelled']
-    infer.data_loaders['test'] = data_loaders['unlabelled']
+    infer.metrics_to_monitor = ['granular_accuracy', 'nn_latentspace', 'entropy_batch_mixing']
+    infer.data_loaders.to_monitor = [target]
+
+    # infer.classifier_inference.data_loaders['train'] = data_loaders['labelled_weighted']
+    # infer.classifier_inference.data_loaders.loop = ['train']
+
+    # infer.data_loaders['train'] = data_loaders['labelled']
+    # infer.data_loaders['test'] = data_loaders['unlabelled']
     #infer.data_loaders.loop = ['train']
 
-    infer.train(n_epochs=800)
+    infer.train(n_epochs=2000)
     print("Accuracy SVAEC : ",infer.accuracy(target))
     filename = '[%s]->%s'%('-'.join(sources), target)
 
-    infer.classifier_inference.train(n_epochs=10, lr=1e-3)
-    print("Accuracy SVAEC : ", infer.accuracy(target))
-    infer.show_t_sne('all', color_by='batches and labels', save_name=filename+'.svg')
-    pickle.dump(dict(infer.history), open(filename+'.pickle', 'wb'))
+    # infer.classifier_inference.train(n_epochs=10, lr=1e-3)
+    # print("Accuracy SVAEC : ", infer.accuracy(target))
+    # infer.show_t_sne('all', color_by='batches and labels', save_name=filename+'.svg')
+    # pickle.dump(dict(infer.history), open(filename+'.pickle', 'wb'))
+    #
+    # infer.classifier_inference.train(n_epochs=100, lr=1e-3)
+    # print("Accuracy SVAEC : ", infer.accuracy(target))
 
-    infer.classifier_inference.train(n_epochs=100, lr=1e-3)
-    print("Accuracy SVAEC : ", infer.accuracy(target))
 
-
-
+infer.show_t_sne('sequential', color_by='batches and labels', n_samples=1000, save_name='mmd-penalty')
 #
 # dataset_shekhar = scmap.create_dataset("../scmap/shekhar/shekhar.rds")
 # dataset_macosko = scmap.create_dataset("../scmap/macosko/macosko.rds")
