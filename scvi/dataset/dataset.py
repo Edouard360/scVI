@@ -3,11 +3,15 @@
 """Handling datasets.
 For the moment, is initialized with a torch Tensor of size (n_cells, nb_genes)"""
 import os
-import urllib.request
+import pickle
+from collections import defaultdict
 
+import loompy
 import numpy as np
 import scipy.sparse as sp_sparse
 import torch
+import urllib.request
+from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset
 
@@ -54,9 +58,9 @@ class GeneExpressionDataset(Dataset):
         indexes = np.array(batch)
         X = torch.FloatTensor(self.X[indexes]) if self.dense else torch.FloatTensor(self.X[indexes].toarray())
         return X, torch.FloatTensor(self.local_means[indexes]), \
-            torch.FloatTensor(self.local_vars[indexes]), \
-            torch.LongTensor(self.batch_indices[indexes]), \
-            torch.LongTensor(self.labels[indexes])
+               torch.FloatTensor(self.local_vars[indexes]), \
+               torch.LongTensor(self.batch_indices[indexes]), \
+               torch.LongTensor(self.labels[indexes])
 
     def update_genes(self, subset_genes):
         if hasattr(self, 'gene_names'):
@@ -74,7 +78,7 @@ class GeneExpressionDataset(Dataset):
     def subsample_genes(self, new_n_genes=None, subset_genes=None):
         n_cells, n_genes = self.X.shape
         if subset_genes is None and \
-                (not hasattr(self, 'gene_names') or new_n_genes is False or new_n_genes >= n_genes):
+            (not hasattr(self, 'gene_names') or new_n_genes is False or new_n_genes >= n_genes):
             return None  # Do nothing if subsample more genes than total number of genes
         if subset_genes is None:
             print("Downsampling from %i to %i genes" % (n_genes, new_n_genes))
@@ -86,6 +90,14 @@ class GeneExpressionDataset(Dataset):
             print("Downsampling from %i to %i genes" % (n_genes, new_n_genes))
         self.X = self.X[:, subset_genes]
         self.update_genes(subset_genes)
+
+    def subsample_genes_m3drop(self, new_n_genes):
+        log_m = np.log(np.mean(self.X, axis=0) + 1e-5).reshape(-1, 1)
+        log_d = np.log(np.sum((self.X == 0), axis=0) + 1e-5).reshape(-1, 1)
+        lin_reg = LinearRegression()
+        lin_reg.fit(log_m, log_d)
+        subset_genes = np.argsort(np.abs(lin_reg.predict(log_m) - log_d).ravel())[::-1]
+        self.subsample_genes(subset_genes=subset_genes[:new_n_genes])
 
     def filter_genes(self, gene_names_ref, on='gene_names'):
         """
@@ -101,24 +113,56 @@ class GeneExpressionDataset(Dataset):
         indices = np.argsort(np.array(self.X.sum(axis=1)).ravel())[::-1][:new_n_cells]
         self.update_cells(indices)
 
-    def filter_cell_types(self, cell_types):
-        """
-        :param cell_types: numpy array of type np.int (indices) or np.str (cell-types names)
-        :return:
-        """
+    def _cell_type_idx(self, cell_types):
         if type(cell_types[0]) is not int:
             current_cell_types = list(self.cell_types)
             cell_types_idx = np.array([current_cell_types.index(cell_type) for cell_type in cell_types])
         else:
             cell_types_idx = np.array(cell_types, dtype=np.int64)
+        return cell_types_idx
+
+    def squeeze(self):
+        relevant_cell_types = [int(i) for i in np.unique(self.labels)]
+        self.filter_cell_types(relevant_cell_types)
+
+    def filter_cell_types(self, cell_types):
+        """
+        :param cell_types: numpy array of type np.int (indices) or np.str (cell-types names)
+        :return:
+        """
+        cell_types_idx = self._cell_type_idx(cell_types)
         if hasattr(self, 'cell_types'):
             self.cell_types = self.cell_types[cell_types_idx]
-            print("Only keeping cell types: \n" + '\n'.join(list(self.cell_types)))
+            print("Only keeping cell types: \n" + ', '.join(list(self.cell_types)))
         idx_to_keep = []
         for idx in cell_types_idx:
             idx_to_keep += [np.where(self.labels == idx)[0]]
-        self.update_cells(np.concatenate(idx_to_keep))
-        self.labels, self.n_labels = arrange_categories(self.labels, mapping_from=cell_types_idx)
+        self.update_cells(np.sort(np.concatenate(idx_to_keep)))
+        self.labels, self.n_labels = arrange_categories(self.labels, mapping_from=cell_types_idx,
+                                                        mapping_to=range(len(self.cell_types)))
+
+    def merge_cell_types(self, cell_types, new_cell_type_name):
+        cell_types_idx = self._cell_type_idx(cell_types)
+        for idx_from in zip(cell_types_idx):
+            self.labels[self.labels == idx_from] = len(self.labels)  # Put at the end the new merged cell-type
+        self.labels, self.n_labels = arrange_categories(self.labels)
+        if hasattr(self, 'cell_types') and type(cell_types[0]) is not int:
+            new_cell_types = list(self.cell_types)
+            for cell_type in cell_types:
+                new_cell_types.remove(cell_type)
+            new_cell_types.append(new_cell_type_name)
+            self.cell_types = np.array(new_cell_types)
+
+    def assign_labels(self, labels):
+        labels = np.array(labels)
+        assert len(labels) == len(self.X)
+        if labels.dtype is np.dtype('str'):
+            self.cell_types = list(np.unique(labels))
+            self.labels = np.array([self.cell_types.index(cell_type) for cell_type in self.cell_types])
+            self.cell_types = np.array(self.cell_types)
+        else:
+            self.labels = labels
+        self.labels = self.labels.reshape(-1, 1)
 
     def download(self):
         if hasattr(self, 'urls') and hasattr(self, 'download_names'):
@@ -126,6 +170,39 @@ class GeneExpressionDataset(Dataset):
                 GeneExpressionDataset._download(url, self.save_path, download_name)
         elif hasattr(self, 'url') and hasattr(self, 'download_name'):
             GeneExpressionDataset._download(self.url, self.save_path, self.download_name)
+
+    def export_loom(self, filename):
+        col_attrs = {"BatchID": self.batch_indices, "ClusterID": self.labels}
+        row_attrs = dict()
+        file_attrs = dict()
+        if hasattr(self, "gene_names"):
+            row_attrs["Gene"] = self.gene_names
+        if hasattr(self, "cell_types"):
+            file_attrs["CellTypes"] = self.cell_types
+        loompy.create("data/" + filename, self.X.T, row_attrs, col_attrs, file_attrs=file_attrs)
+
+    def export_pickle(self, filename):
+        pickle_dictionary = {"batch_indices": self.batch_indices, "labels": self.labels}
+        if hasattr(self, "gene_names"):
+            pickle_dictionary["gene_names"] = self.gene_names
+        if hasattr(self, "cell_types"):
+            pickle_dictionary["cell_types"] = self.cell_types
+        pickle_dictionary["X"] = self.X
+        pickle.dump(pickle_dictionary, open(filename, 'wb'))
+
+    @staticmethod
+    def load_pickle(filename):
+        pickle_dictionary = defaultdict(lambda: None)
+        pickle_dictionary.update(pickle.load(open(filename, 'rb')))
+        return GeneExpressionDataset(
+            *GeneExpressionDataset.get_attributes_from_matrix(
+                pickle_dictionary["X"],
+                batch_index=pickle_dictionary["batch_indices"],
+                labels=pickle_dictionary["labels"]
+            ),
+            cell_types=pickle_dictionary["cell_types"],
+            gene_names=pickle_dictionary["gene_names"]
+        )
 
     @staticmethod
     def _download(url, save_path, download_name):
@@ -254,6 +331,13 @@ class GeneExpressionDataset(Dataset):
         gene_names = list(getattr(gene_dataset, on))
         subset_genes = np.array([gene_names.index(gene_name) for gene_name in gene_names_ref], dtype=np.int64)
         return gene_dataset.X[:, subset_genes], subset_genes
+
+    def __str__(self):
+        batch_count = np.zeros((self.n_batches, self.n_labels))
+        for j in range(self.n_labels):
+            for i, c in zip(*np.unique((self.labels[(self.batch_indices == j).ravel()]), return_counts=True)):
+                batch_count[j, i] = c
+        return batch_count.astype(np.int).__str__()
 
 
 def arrange_categories(original_categories, mapping_from=None, mapping_to=None):
