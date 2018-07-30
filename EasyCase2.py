@@ -14,6 +14,7 @@ import seaborn as sns
 
 from scvi.dataset.BICCN import *
 from scvi.harmonization.Seurat import SEURAT
+from scvi.harmonization.Combat import COMBAT
 from scvi.harmonization.benchmark import sample_by_batch, knn_purity_avg
 from scvi.metrics.clustering import entropy_batch_mixing
 
@@ -51,6 +52,13 @@ res = knn_purity_avg(latent, labels.astype('int'), cell_types, acc=True)
 
 
 gene_dataset,labels_groups = combine_MacoskoRegev()
+
+from scvi.dataset.cortex import CortexDataset
+gene_dataset = CortexDataset()
+gene_dataset.batch_indices = np.concatenate([np.repeat(0,1000),np.repeat(1,2005)])
+from scvi.harmonization.Combat import COMBAT
+comb
+
 
 if model_type is 'vae':
     if load_model is True:

@@ -1,10 +1,11 @@
-from scvi.harmonization.utils_chenling import get_matrix_from_dir,get_matrix_from_h5,TryFindCells
+from scvi.harmonization.utils_chenling import get_matrix_from_h5, TryFindCells
 import numpy as np
 from scvi.dataset.dataset import GeneExpressionDataset
 from sklearn.datasets import dump_svmlight_file, load_svmlight_file
-import os.path
+import os
+from scipy.sparse import csr_matrix
 
-def combine_MacoskoRegev(ngenes=5000, collapse_labels=False):
+def combine_MacoskoRegev(ngenes=5000):
     dataset1 = MacoskoDataset()
     dataset2 = RegevDataset()
     gene_dataset = GeneExpressionDataset.concat_datasets(dataset1, dataset2)
@@ -33,6 +34,7 @@ def combine_MacoskoRegev(ngenes=5000, collapse_labels=False):
                        'Oligo Enpp6_1', 'Oligo Enpp6_2', 'Oligo Opalin',
                        'Sncg Ptprk',
                        'Endo Slc38a5', 'Endo Slc38a5_Peri_2', 'Endo Slc38a5_Peri_1']
+    key_color_order = [x.upper() for x in key_color_order]
     clust_large = np.concatenate([np.repeat(0, 4),  # Pvalb
                                   np.repeat(1, 3),  # Pvalb Ex
                                   np.repeat(2, 2),  # Pvalb Astrol
@@ -56,103 +58,118 @@ def combine_MacoskoRegev(ngenes=5000, collapse_labels=False):
                                   ])
     label_dict = dict(zip(keys, np.arange(len(keys))))
     ordered_label = [label_dict[x] for x in key_color_order]
-    if collapse_labels is True:
-        label_dict = dict(zip(ordered_label, clust_large))
-        new_labels = np.asarray([label_dict[x] for x in labels])
-        new_cell_types = np.asarray(
-            ['Pvalb', 'Pvalb Ex', 'Pvalb Astrol', 'L2/3', 'Sst', 'L5PT', 'L5 IT Tcap', 'L5 IT Aldh1a7', 'L5 NP',
-             'L6 IT', 'L6 CT', 'L6b', 'Lamp5', 'VIP', 'Astro', 'OPC', 'VLMC', 'Oligo', 'Sncg', 'Endo'])
-    else:
-        label_dict = dict(zip(ordered_label,np.arange(len(ordered_label))))
-        new_labels = np.asarray([label_dict[x] for x in labels])
-        new_cell_types = key_color_order
+    label_dict = dict(zip(ordered_label, np.arange(len(ordered_label))))
+    new_labels = np.asarray([label_dict[x] for x in labels])
+    new_cell_types = key_color_order
     gene_dataset.labels = new_labels
     gene_dataset.cell_types = new_cell_types
-    return(gene_dataset,clust_large)
+    return (gene_dataset, clust_large)
+
 
 class MacoskoDataset(GeneExpressionDataset):
     def __init__(self, save_path='../AIBS/'):
         self.save_path = save_path
-        count, labels, cell_type, gene_names = self.preprocess()
+        count, labels, cell_type, gene_names,labels_groups = self.preprocess()
         super(MacoskoDataset, self).__init__(
             *GeneExpressionDataset.get_attributes_from_matrix(
                 count, labels=labels),
             gene_names=np.char.upper(gene_names), cell_types=cell_type)
-
+        self.labels_groups = labels_groups
     def preprocess(self):
         if os.path.isfile(self.save_path + 'macosko_data.svmlight'):
             count, labels = load_svmlight_file(self.save_path + 'macosko_data.svmlight')
             cell_type = np.load(self.save_path + 'macosko_data.celltypes.npy')
+            labels_groups = np.load(self.save_path + 'macosko_data.labels_groups.npy')
             gene_names = np.load(self.save_path + 'macosko_data.gene_names.npy')
-            return(count,labels,cell_type,gene_names)
+            return(count, labels, cell_type, gene_names, labels_groups)
         else:
-            macosko_batches = ['a','b','c','d','e','f','g','h']
-            label = np.genfromtxt(self.save_path + '10X_nuclei_Macosko/cluster.membership.csv', dtype='str', delimiter=',')
-            label_batch = np.asarray([str(int(int(x.split('-')[1].split('"')[0])/11)) for x in label[1:,0]])
-            label_barcode = np.asarray([x.split('-')[0].split('"')[1] for x in label[1:,0]])
-            label_cluster = np.asarray([x.split('"')[1] for x in label[1:,1]])
-            label_map = np.genfromtxt(self.save_path + '10X_nuclei_Macosko/cluster.annotation.csv', dtype='str', delimiter=',')
-            label_map = dict(zip([x.split('"')[1] for x in label_map[:, 0]], [x.split('"')[1] for x in label_map[:, 1]]))
+            macosko_batches = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+            label = np.genfromtxt(self.save_path + '10X_nuclei_Macosko/cluster.membership.csv', dtype='str',
+                                  delimiter=',')
+            label_batch = np.asarray([str(int(int(x.split('-')[1].split('"')[0]) / 11)) for x in label[1:, 0]])
+            label_barcode = np.asarray([x.split('-')[0].split('"')[1] for x in label[1:, 0]])
+            label_cluster = np.asarray([x.split('"')[1] for x in label[1:, 1]])
+            label_map = np.genfromtxt(self.save_path + '10X_nuclei_Macosko/cluster.annotation.csv', dtype='str',
+                                      delimiter=',')
+            label_map = dict(
+                zip([x.split('"')[1] for x in label_map[:, 0]], [x.split('"')[1] for x in label_map[:, 1]]))
             macosko_data = []
             for batch_i, batch in enumerate(macosko_batches):
-                count, geneid, cellid = get_matrix_from_dir(self.save_path + '10X_nuclei_Macosko/'+'171218_p56m1'+ batch)
-                geneid = geneid[:,1]
+                geneid, cellid, count = get_matrix_from_h5(
+                    self.save_path + '10X_nuclei_Macosko/' + '171218_p56m1' + batch + '/outs/filtered_gene_bc_matrices_h5.h5',
+                    'mm10_premrna')
                 count = count.T.tocsr()
-                print(count.shape,len(geneid),len(cellid))
+                print(count.shape, len(geneid), len(cellid))
                 cellid = [id.split('-')[0] for id in cellid]
-                label_dict = dict(zip(label_barcode[label_batch == str(batch_i+1)],label_cluster[label_batch == str(batch_i+1)]))
+                label_dict = dict(
+                    zip(label_barcode[label_batch == str(batch_i + 1)], label_cluster[label_batch == str(batch_i + 1)]))
                 new_count, matched_label = TryFindCells(label_dict, cellid, count)
-                new_label = np.repeat(0,len(matched_label))
-                for i,x in enumerate(np.unique(matched_label)):
+                new_label = np.repeat(0, len(matched_label))
+                for i, x in enumerate(np.unique(matched_label)):
                     new_label[matched_label == x] = i
                 cell_type = [label_map[x] for x in np.unique(matched_label)]
-                dataset = GeneExpressionDataset(*GeneExpressionDataset.get_attributes_from_matrix(new_count, labels=new_label),
-                                            gene_names=geneid, cell_types=cell_type)
-                print(dataset.X.shape,len(dataset.labels))
-                if len(macosko_data)>0:
-                    macosko_data = GeneExpressionDataset.concat_datasets(macosko_data,dataset)
+                dataset = GeneExpressionDataset(
+                    *GeneExpressionDataset.get_attributes_from_matrix(new_count, labels=new_label),
+                    gene_names=geneid, cell_types=cell_type)
+                print(dataset.X.shape, len(dataset.labels))
+                if len(macosko_data) > 0:
+                    macosko_data = GeneExpressionDataset.concat_datasets(macosko_data, dataset)
                 else:
                     macosko_data = dataset
-            dump_svmlight_file(macosko_data.X,np.concatenate(macosko_data.labels),self.save_path +'macosko_data.svmlight')
-            np.save(self.save_path + 'macosko_data.celltypes.npy',macosko_data.cell_types)
-            np.save(self.save_path + 'macosko_data.gene_names.npy',macosko_data.gene_names)
-            count, labels = load_svmlight_file(self.save_path + 'macosko_data.svmlight')
-            cell_type = np.load(self.save_path + 'macosko_data.celltypes.npy')
-            gene_names = np.load(self.save_path + 'macosko_data.gene_names.npy')
-            return(count,labels,cell_type,gene_names)
-
+            dataset = macosko_data
+            cell_type = dataset.cell_types
+            groups = ['Pvalb', 'L2/3', 'Sst', 'L5 PT', 'L5 IT Tcap', 'L5 IT Aldh1a7', 'L5 IT Foxp2', 'L5 NP',
+                      'L6 IT', 'L6 CT', 'L6 NP', 'L6b', 'Lamp5', 'Vip', 'Astro', 'OPC', 'VLMC', 'Oligo', 'Sncg', 'Endo',
+                      'SMC', 'MICRO']
+            cell_type = [x.upper() for x in cell_type]
+            groups = [x.upper() for x in groups]
+            labels = np.asarray([cell_type[x] for x in np.concatenate(dataset.labels)])
+            cell_type_bygroup = np.concatenate([[x for x in cell_type if x.startswith(y)] for y in groups])
+            new_labels_dict = dict(zip(cell_type_bygroup, np.arange(len(cell_type_bygroup))))
+            new_labels = np.asarray([new_labels_dict[x] for x in labels])
+            labels_groups = [[i for i, x in enumerate(groups) if y.startswith(x)][0] for y in cell_type_bygroup]
+            dump_svmlight_file(dataset.X, new_labels, self.save_path + 'macosko_data.svmlight')
+            np.save(self.save_path + 'macosko_data.celltypes.npy', cell_type_bygroup)
+            np.save(self.save_path + 'macosko_data.gene_names.npy', dataset.gene_names)
+            np.save(self.save_path + 'macosko_data.labels_groups.npy', labels_groups)
+            return (dataset.X, new_labels, cell_type_bygroup, dataset.gene_names, labels_groups)
 
 
 class RegevDataset(GeneExpressionDataset):
     def __init__(self, save_path='../AIBS/'):
         self.save_path = save_path
-        count,labels,cell_type,gene_names = self.preprocess()
+        count, labels, cell_type, gene_names, labels_groups = self.preprocess()
         super(RegevDataset, self).__init__(
             *GeneExpressionDataset.get_attributes_from_matrix(
                 count, labels=labels),
             gene_names=np.char.upper(gene_names), cell_types=cell_type)
+        self.labels_groups = labels_groups
 
     def preprocess(self):
         if os.path.isfile(self.save_path + 'regev_data.svmlight'):
             count, labels = load_svmlight_file(self.save_path + 'regev_data.svmlight')
             cell_type = np.load(self.save_path + 'regev_data.celltypes.npy')
             gene_names = np.load(self.save_path + 'regev_data.gene_names.npy')
-            return(count,labels,cell_type,gene_names)
+            labels_groups = np.load(self.save_path + 'regev_data.labels_groups.npy')
+            return(count, labels, cell_type, gene_names, labels_groups)
         else:
             regev_batches = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
-            label = np.genfromtxt(self.save_path + '10X_nuclei_Regev/cluster.membership.csv', dtype='str', delimiter=',')
+            label = np.genfromtxt(self.save_path + '10X_nuclei_Regev/cluster.membership.csv', dtype='str',
+                                  delimiter=',')
             label_batch = np.asarray([str(int(int(x.split('-')[1].split('"')[0]))) for x in label[1:, 0]])
             label_barcode = np.asarray([x.split('-')[0].split('"')[1] for x in label[1:, 0]])
             label_cluster = np.asarray([x.split('"')[1] for x in label[1:, 1]])
-            label_map = np.genfromtxt(self.save_path + '10X_nuclei_Regev/cluster.annotation.csv', dtype='str', delimiter=',')
-            label_map = dict(zip([x.split('"')[1] for x in label_map[:, 0]], [x.split('"')[1] for x in label_map[:, 1]]))
+            label_map = np.genfromtxt(self.save_path + '10X_nuclei_Regev/cluster.annotation.csv', dtype='str',
+                                      delimiter=',')
+            label_map = dict(
+                zip([x.split('"')[1] for x in label_map[:, 0]], [x.split('"')[1] for x in label_map[:, 1]]))
             regev_data = []
             for batch_i, batch in enumerate(regev_batches):
                 geneid, cellid, count = get_matrix_from_h5(
-                    self.save_path + '10X_nuclei_Regev/' + batch + '1/filtered_gene_bc_matrices_h5.h5', 'mm10-1.2.0_premrna')
+                    self.save_path + '10X_nuclei_Regev/' + batch + '1/filtered_gene_bc_matrices_h5.h5',
+                    'mm10-1.2.0_premrna')
                 count = count.T.tocsr()
                 cellid = [id.split('-')[0] for id in cellid]
-                print(count.shape, len(geneid), len(cellid))
                 label_dict = dict(
                     zip(label_barcode[label_batch == str(batch_i + 1)], label_cluster[label_batch == str(batch_i + 1)]))
                 new_count, matched_label = TryFindCells(label_dict, cellid, count)
@@ -168,56 +185,122 @@ class RegevDataset(GeneExpressionDataset):
                     regev_data = GeneExpressionDataset.concat_datasets(regev_data, dataset)
                 else:
                     regev_data = dataset
+            dataset = regev_data
+            cell_type = dataset.cell_types
+            groups = ['Pvalb', 'L2/3', 'Sst', 'L5 PT', 'L5 IT Tcap', 'L5 IT Aldh1a7', 'L5 IT Foxp2', 'L5 NP',
+                      'L6 IT', 'L6 CT', 'L6 NP', 'L6b', 'Lamp5', 'Vip', 'Astro', 'OPC', 'VLMC', 'Oligo', 'Sncg', 'Endo',
+                      'SMC', 'MICRO']
+            cell_type = [x.upper() for x in cell_type]
+            groups = [x.upper() for x in groups]
+            labels = np.asarray([cell_type[x] for x in np.concatenate(dataset.labels)])
+            cell_type_bygroup = np.concatenate([[x for x in cell_type if x.startswith(y)] for y in groups])
+            new_labels_dict = dict(zip(cell_type_bygroup, np.arange(len(cell_type_bygroup))))
+            new_labels = np.asarray([new_labels_dict[x] for x in labels])
+            labels_groups = [[i for i, x in enumerate(groups) if y.startswith(x)][0] for y in cell_type_bygroup]
+            dump_svmlight_file(dataset.X, new_labels, self.save_path+'regev_data.svmlight')
+            np.save(self.save_path + 'regev_data.celltypes.npy', cell_type_bygroup)
+            np.save(self.save_path + 'regev_data.gene_names.npy', dataset.gene_names)
+            np.save(self.save_path + 'regev_data.labels_groups.npy', labels_groups)
+            return (dataset.X, new_labels, cell_type_bygroup, dataset.gene_names, labels_groups)
 
-            dump_svmlight_file(regev_data.X, np.concatenate(regev_data.labels), 'regev_data.svmlight')
-            np.save(self.save_path + 'regev_data.celltypes.npy', regev_data.cell_types)
-            np.save(self.save_path + 'regev_data.gene_names.npy', regev_data.gene_names)
-            count, labels = load_svmlight_file(self.save_path + 'regev_data.svmlight')
-            cell_type = np.load(self.save_path + 'regev_data.celltypes.npy')
-            gene_names = np.load(self.save_path + 'regev_data.gene_names.npy')
-            return(count,labels,cell_type,gene_names)
-#
-# class Zeng10Xcells(GeneExpressionDataset):
-#     def __init(self,save_path='../AIBS/'):
-#         self.save_path = save_path
-#         count, labels, cell_type, gene_names = self.preprocess()
-#         super(Zeng10Xcells, self).__init__(
-#             *GeneExpressionDataset.get_attributes_from_matrix(
-#                 count, labels=labels),
-#             gene_names=np.char.upper(gene_names), cell_types=cell_type)
-#     def preprocess(self):
-#         geneid, cellid, count = get_matrix_from_h5(self.save_path + '10X_cells_AIBS/umi_counts.h5', 'mm10-1.2.0_premrna')
-#         count = count.T.tocsr()
-#         cellid = [id.split('-')[0] for id in cellid]
-#         label = np.genfromtxt(self.save_path + '10X_cells_AIBS/cluster.membership.csv', dtype='str', delimiter=',')
-#         label_batch = np.asarray([str(int(int(x.split('-')[1].split('"')[0]))) for x in label[1:, 0]])
-#         label_barcode = np.asarray([x.split('-')[0].split('"')[1] for x in label[1:, 0]])
-#         label_cluster = np.asarray([x.split('"')[1] for x in label[1:, 1]])
-#         label_map = np.genfromtxt(self.save_path + '10X_nuclei_Regev/cluster.annotation.csv', dtype='str',
-#                                   delimiter=',')
-#         label_map = dict(zip([x.split('"')[1] for x in label_map[:, 0]], [x.split('"')[1] for x in label_map[:, 1]]))
-#         dataset = GeneExpressionDataset(
-#             *GeneExpressionDataset.get_attributes_from_matrix(new_count, labels=new_label),
-#             gene_names=geneid, cell_types=cell_type)
-#
-# geneid, cellid, count = get_matrix_from_h5('../AIBS/10X_cells_AIBS/umi_counts.h5', 'mm10-1.2.0_premrna')
-# count = count.T.tocsr()
-# label = np.genfromtxt('../AIBS/10X_cells_AIBS/cluster.membership.csv', dtype='str', delimiter=',')
-# label_cluster = np.asarray([x.split('"')[1] for x in label[1:, 1]])
-# label_barcode = np.asarray([x.split('"')[1] for x in label[1:, 0]])
-# label_barcode = np.asarray([x.split('L8TX')[0] for x in label_barcode])
-# label_batch = np.asarray([x.split('-')[1] for x in label_barcode])
-# cellid_batch = np.asarray([x.split('-')[1] for x in cellid])
-# label_dict = dict(zip(label_barcode, label_cluster))
-# new_count, matched_label = TryFindCells(label_dict, cellid, count)
-# label_map = np.genfromtxt('../AIBS/' + '10X_cells_AIBS/cluster.annotation.csv', dtype='str', delimiter=',')
-# map_clust = np.asarray([x.split('"')[1] for x in label_map[1:, 0]])
-# map_type = np.asarray([x.split('"')[1] for x in label_map[1:, 1]])
-# cell_type = []
-# for x in map_type:
-#     temp = x.split(' ')
-#     cell_type.append(temp[0:(len(temp))])
-# temp = np.asarray([x.split(' ') )
-# dataset = GeneExpressionDataset(
-#                     *GeneExpressionDataset.get_attributes_from_matrix(new_count, labels=new_label),
-#                     gene_names=geneid, cell_types=cell_type)
+
+class Zeng10X(GeneExpressionDataset):
+    def __init__(self, save_path='../AIBS/',cell_compartment='nuclei'):
+        self.save_path = save_path
+        self.cell_compartment = cell_compartment
+        count, labels, cell_type, gene_names, labels_groups = self.preprocess()
+        super(Zeng10X, self).__init__(
+            *GeneExpressionDataset.get_attributes_from_matrix(
+                count, labels=labels),
+            gene_names=np.char.upper(gene_names), cell_types=cell_type)
+        self.labels_groups = labels_groups
+
+    def preprocess(self):
+        if self.cell_compartment is 'cell':
+            geneid, cellid, count = get_matrix_from_h5(self.save_path + '10X_cells_AIBS/umi_counts.h5',
+                                                       'mm10-1.2.0_premrna')
+            label = np.genfromtxt(self.save_path + '10X_cells_AIBS/cluster.membership.csv', dtype='str', delimiter=',')
+            label_map = np.genfromtxt(self.save_path + '10X_cells_AIBS/cluster.annotation.csv', dtype='str',
+                                      delimiter=',')
+        elif self.cell_compartment is 'nuclei':
+            geneid, cellid, count = get_matrix_from_h5(self.save_path + '10X_nuclei_AIBS/umi_counts.h5',
+                                                       'mm10-1.2.0_premrna')
+            label = np.genfromtxt(self.save_path + '10X_nuclei_AIBS/cluster.membership.csv', dtype='str', delimiter=',')
+            label_map = np.genfromtxt(self.save_path + '10X_nuclei_AIBS/cluster.annotation.csv', dtype='str',
+                                      delimiter=',')
+        count = count.T.tocsr()
+        label_cluster = np.asarray([x.split('"')[1] for x in label[1:, 1]])
+        label_barcode = np.asarray([x.split('"')[1] for x in label[1:, 0]])
+        label_barcode = np.asarray([x.split('L8TX')[0] for x in label_barcode])
+        label_dict = dict(zip(label_barcode, label_cluster))
+        new_count, matched_label = TryFindCells(label_dict, cellid, count)
+        map_clust = np.asarray([x.split('"')[1] for x in label_map[1:, 0]])
+        cell_type = np.asarray([x.split('"')[1] for x in label_map[1:, 1]])
+        cell_type[cell_type == 'IT L6b'] = 'L6B IT'
+        unique_index = np.unique(cell_type, return_index=True)[1]
+        not_unique = [x for x in np.arange(len(cell_type)) if x not in set(unique_index)]
+        for k, i in enumerate(not_unique):
+            cell_type[i] = cell_type[i] + '_' + str(k)
+        groups = ['Pvalb', 'L2/3', 'Sst', 'L5 PT', 'L5 IT Tcap', 'L5 IT Aldh1a7', 'L5 IT Foxp2', 'L5 NP',
+        'L6 IT', 'L6 CT', 'L6 NP', 'L6b', 'Lamp5', 'Vip', 'Astro', 'OPC', 'VLMC', 'Oligo', 'Sncg', 'Endo',
+        'SMC', 'MICRO']
+        cell_type = [x.upper() for x in cell_type]
+        groups = [x.upper() for x in groups]
+        temp = dict(zip(map_clust, cell_type))
+        labels = np.asarray([temp[x] for x in matched_label])
+        cell_type_bygroup = np.concatenate([[x for x in cell_type if x.startswith(y)] for y in groups])
+        new_labels_dict = dict(zip(cell_type_bygroup, np.arange(len(cell_type_bygroup))))
+        new_labels = np.asarray([new_labels_dict[x] for x in labels])
+        labels_groups = [[i for i, x in enumerate(groups) if y.startswith(x)][0] for y in cell_type_bygroup]
+        return (new_count, new_labels, cell_type_bygroup, geneid, labels_groups)
+
+class ZengSS2(GeneExpressionDataset):
+    def __init__(self, save_path='../AIBS/',cell_compartment='nuclei'):
+        self.save_path = save_path
+        self.cell_compartment = cell_compartment
+        count, labels, cell_type, gene_names, labels_groups = self.preprocess()
+        super(ZengSS2, self).__init__(
+            *GeneExpressionDataset.get_attributes_from_matrix(
+                count, labels=labels),
+            gene_names=np.char.upper(gene_names), cell_types=cell_type)
+        self.labels_groups = labels_groups
+
+    def preprocess(self):
+        if self.cell_compartment is 'cell':
+            mat = np.genfromtxt(self.save_path + 'SmartSeq_cells_AIBS/exon.counts.csv',dtype='str',delimiter=',')
+            label = np.genfromtxt(self.save_path + 'SmartSeq_cells_AIBS/cluster.membership.csv', dtype='str', delimiter=',')
+            label_map = np.genfromtxt(self.save_path + 'SmartSeq_cells_AIBS/cluster.annotation.csv', dtype='str',
+                                      delimiter=',')
+            cellid = np.asarray([x.split('"')[1] for x in mat[0, 1:]])
+            geneid = np.asarray([x.split('"')[1] for x in mat[1:, 0]])
+            count = mat[1:,1:].astype('int')
+            count = csr_matrix(count.T)
+        elif self.cell_compartment is 'nuclei':
+            mat = np.genfromtxt(self.save_path + 'SmartSeq_nuclei_AIBS/exon.counts.csv',dtype='str',delimiter=',')
+            label = np.genfromtxt(self.save_path + 'SmartSeq_nuclei_AIBS/cluster.membership.csv', dtype='str', delimiter=',')
+            label_map = np.genfromtxt(self.save_path + 'SmartSeq_nuclei_AIBS/cluster.annotation.csv', dtype='str',
+                                      delimiter=',')
+            cellid = np.asarray([x.split('"')[1] for x in mat[0, 1:]])
+            geneid = np.asarray([x.split('"')[1] for x in mat[1:, 0]])
+            count = mat[1:,1:].astype('int')
+            count = csr_matrix(count.T)
+        label_cluster = np.asarray([x.split('"')[1] for x in label[1:, 1]])
+        label_barcode = np.asarray([x.split('"')[1] for x in label[1:, 0]])
+        label_barcode = np.asarray([x.split('L8TX')[0] for x in label_barcode])
+        label_dict = dict(zip(label_barcode, label_cluster))
+        new_count, matched_label = TryFindCells(label_dict, cellid, count)
+        map_clust = np.asarray([x.split('"')[1] for x in label_map[1:, 0]])
+        cell_type = np.asarray([x.split('"')[1] for x in label_map[1:, 1]])
+        groups = ['Pvalb', 'L2/3', 'Sst', 'L5 PT', 'L5 IT Tcap', 'L5 IT Aldh1a7', 'L5 IT Foxp2', 'L5 NP',
+                  'L6 IT', 'L6 CT', 'L6 NP', 'L6b', 'Lamp5', 'Vip', 'Astro', 'OPC', 'VLMC', 'Oligo', 'Sncg', 'Endo',
+                  'SMC','MICRO']
+        cell_type = [x.upper() for x in cell_type]
+        groups = [x.upper() for x in groups]
+        temp = dict(zip(map_clust, cell_type))
+        labels = np.asarray([temp[x] for x in matched_label])
+        cell_type_bygroup = np.concatenate([[x for x in cell_type if x.startswith(y)] for y in groups])
+        new_labels_dict = dict(zip(cell_type_bygroup, np.arange(len(cell_type_bygroup))))
+        new_labels = np.asarray([new_labels_dict[x] for x in labels])
+        labels_groups = [[i for i, x in enumerate(groups) if y.startswith(x)][0] for y in cell_type_bygroup]
+        return (new_count, new_labels, cell_type_bygroup, geneid, labels_groups)
+
