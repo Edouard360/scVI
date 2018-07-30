@@ -1,4 +1,10 @@
+from scvi.dataset.dataset import arrange_categories
+
 use_cuda = True
+import rpy2.robjects as ro
+import rpy2.robjects.numpy2ri
+import warnings
+from rpy2.rinterface import RRuntimeWarning
 import torch
 from torch.utils.data import DataLoader
 import numpy as np
@@ -11,8 +17,7 @@ from sklearn.manifold import TSNE
 import seaborn as sns
 
 from scvi.dataset.BICCN import *
-from scvi.harmonization.Seurat import SEURAT
-from scvi.harmonization.Combat import COMBAT
+from scvi.harmonization import SEURAT, COMBAT
 from scvi.harmonization.benchmark import sample_by_batch, knn_purity_avg
 from scvi.metrics.clustering import entropy_batch_mixing
 
@@ -88,7 +93,7 @@ labels_groups, n = arrange_categories(np.array(labels_groups))
 from scvi.dataset.cortex import CortexDataset
 gene_dataset = CortexDataset()
 gene_dataset.batch_indices = np.concatenate([np.repeat(0,1000),np.repeat(1,2005)])
-from scvi.harmonization.Combat import COMBAT
+
 
 
 if model_type is 'vae':
@@ -116,7 +121,7 @@ elif model_type is 'svaec':
                       gene_dataset.n_labels,use_labels_groups=True,labels_groups = list(labels_groups))
         # svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
         #               gene_dataset.n_labels,use_labels_groups=False)
-        infer = JointSemiSupervisedVariationalInference(svaec, gene_dataset, n_labelled_samples_per_class=20)
+        infer = SemiSupervisedVariationalInference(svaec, gene_dataset, n_labelled_samples_per_class=20)
         infer.train(n_epochs=50)
         infer.accuracy('unlabelled')
         torch.save(infer.model,'../easycase2.svaec.hierarchy.pt')

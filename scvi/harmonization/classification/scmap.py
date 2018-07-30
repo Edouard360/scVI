@@ -7,12 +7,14 @@ import rpy2.robjects.numpy2ri
 from rpy2.rinterface import RRuntimeWarning
 
 from scvi.dataset import GeneExpressionDataset, SemiSupervisedDataLoaders
-from scipy.sparse import csr_matrix
+from scvi.metrics.classification import compute_accuracy_tuple
+
 Accuracy = namedtuple('Accuracy',
                       ['accuracy',
                        'unclassified_rate',
                        'accuracy_over_known_classes',
                        'accuracy_over_known_classes_and_assigned'])
+
 
 def convert_labels_str(str_labels):
     str_labels[str_labels == 'unassigned'] = -1
@@ -25,13 +27,15 @@ def convert_labels_levels(r_indices, levels):
 
 class SCMAP():
     # An algorithm for annotation
-    def __init__(self):
+    def __init__(self, n_features=100, threshold=0):
         # self.n_clusters = n_clusters
         warnings.filterwarnings("ignore", category=RRuntimeWarning)
         rpy2.robjects.numpy2ri.activate()
         ro.r["library"]("scmap")
         ro.r["library"]("SingleCellExperiment")
         ro.r["library"]("matrixStats")
+        self.n_features = n_features
+        self.threshold = threshold
 
     def create_dataset(self, path):
         print("Reading rds")
@@ -98,6 +102,33 @@ class SCMAP():
         self.combined_labels_pred = convert_labels_str(ro.r("result$combined_labs"))
 
         return self.labels_pred
+
+    def fit_scmap_cluster(self, data_train, labels_train):
+        self.reference = 'train'
+        self.create_sce_object(data_train, np.arange(data_train.shape[1]).astype(np.str),
+                               labels_train, self.reference)
+
+        self.select_features(self.reference, n_features=self.n_features)
+
+        ro.r("%s<-indexCluster(%s)" % (self.reference, self.reference))
+
+    def predict_scmap_cluster(self, data_test, labels_test):
+        self.projection = 'test'
+        self.create_sce_object(data_test, np.arange(data_test.shape[1]).astype(np.str),
+                               labels_test, self.projection)
+        ro.r("result<-scmapCluster(%s, list(metadata(%s)$scmap_cluster_index), threshold=%.1f)"
+             % (self.projection, self.reference, self.threshold))
+
+        self.probs = ro.r("result$scmap_cluster_siml")
+
+        self.labels_pred = convert_labels_str(ro.r("result$scmap_cluster_labs"))  # 'unassigned' are included
+        self.combined_labels_pred = convert_labels_str(ro.r("result$combined_labs"))
+        return self.labels_pred
+
+    def score(self, data_test, labels_test):
+        labels_pred = self.predict_scmap_cluster(data_test, labels_test)
+        self.test_tuple = compute_accuracy_tuple(labels_test, labels_pred)
+        return np.mean(labels_pred == labels_test)
 
     def scmap_cell(self, reference, projection, w=10, threshold=0, n_features=500):
         self.select_features(reference, n_features=n_features)

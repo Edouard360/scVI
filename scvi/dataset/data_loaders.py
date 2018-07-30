@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from sklearn.model_selection._split import _validate_shuffle_split
 from torch.utils.data import DataLoader
-from torch.utils.data.sampler import SubsetRandomSampler, SequentialSampler, RandomSampler
+from torch.utils.data.sampler import SubsetRandomSampler, SequentialSampler, RandomSampler, WeightedRandomSampler
 
 
 class SequentialSubsetSampler(SubsetRandomSampler):
@@ -37,6 +37,20 @@ class DataLoaderWrapper(DataLoader):
 
     def __iter__(self):
         return map(self.to_cuda, super(DataLoaderWrapper, self).__iter__())
+
+    def __add__(self, other):
+        assert hasattr(self.sampler, "indices") and hasattr(other.sampler, "indices")
+        new_indices = np.sort(np.concatenate((self.sampler.indices, other.sampler.indices)))
+        new_kwargs = copy.copy(self.kwargs)
+        new_kwargs["sampler"] = SubsetRandomSampler(new_indices)
+        return DataLoaderWrapper(self.dataset, use_cuda=self.use_cuda, **new_kwargs)
+
+
+    def __radd__(self, other):
+        if other == 0:
+            return self
+        else:
+            return self.__add__(other)
 
 
 class DataLoaders:
@@ -75,7 +89,7 @@ class DataLoaders:
         data_loaders_loop = [self[name] for name in self.loop]
         return zip(data_loaders_loop[0], *[cycle(data_loader) for data_loader in data_loaders_loop[1:]])
 
-    def __call__(self, shuffle=False, indices=None):
+    def __call__(self, shuffle=False, indices=None, weighted=False, scale=50):
         if indices is not None and shuffle:
             raise ValueError('indices is mutually exclusive with shuffle')
         if indices is None:
@@ -84,7 +98,23 @@ class DataLoaders:
             else:
                 sampler = SequentialSampler(self.gene_dataset)
         else:
-            sampler = SubsetRandomSampler(indices)
+            if hasattr(indices, 'dtype') and indices.dtype is np.dtype('bool'):
+                indices = np.where(indices)[0].ravel()
+            if weighted is False:
+                sampler = SubsetRandomSampler(indices)
+            else:
+                if weighted is True:
+                    weights = np.zeros(len(self.gene_dataset))
+                    labels = self.gene_dataset.labels[indices].ravel()
+                    weights_ = np.zeros(labels.shape)
+                    for l, c in zip(*np.unique(labels, return_counts=True)):
+                        #weights_[labels == l] = 1 / c * np.log(1 + np.sqrt(c) / scale)
+                        #weights_[labels == l] = np.maximum((1 / c) * np.sqrt(np.log(1 + (c / scale) ** 2))
+                        weights_[labels == l] = min(1/c, 1/50)
+                    weights[indices] = weights_
+                else:
+                    weights = weighted
+                sampler = WeightedRandomSampler(weights, num_samples=len(indices))
         return DataLoaderWrapper(self.gene_dataset, use_cuda=self.use_cuda, sampler=sampler,
                                  **self.kwargs)
 
@@ -137,6 +167,7 @@ class TrainTestDataLoaders(DataLoaders):
 
 class SemiSupervisedDataLoaders(DataLoaders):
     to_monitor = ['labelled', 'unlabelled']
+    loop = ['all', 'labelled']
 
     def __init__(self, gene_dataset, n_labelled_samples_per_class=50, seed=0, use_cuda=True, **kwargs):
         """
