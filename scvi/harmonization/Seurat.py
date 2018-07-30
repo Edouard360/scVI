@@ -32,9 +32,7 @@ class SEURAT():
         seurat = ro.r('SeuratPreproc(X,genenames,labels,batchname)')
         return seurat
 
-    def combine_seurat(self, dataset1, dataset2):
-        seurat1 = self.create_seurat(dataset1, 0)
-        seurat2 = self.create_seurat(dataset2, 1)
+    def combine_seurat(self, seurat1, seurat2):
         ro.r.assign("seurat1", seurat1)
         ro.r.assign("seurat2", seurat2)
         combined = ro.r('hvg_CCA(seurat1,seurat2)')
