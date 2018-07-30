@@ -36,6 +36,12 @@ hvg_CCA <- function(data1,data2,ndim=10,plotting=F,discard=T){
 	}
 	combined <- AlignSubspace(object = combined, reduction.type = "cca", grouping.var = "batch",
 	    dims.align = 1:ndim)
-	return(combined)
+    latent <- GetDimReduction(object = combined,
+        reduction.type = "cca.aligned",
+        slot = "cell.embeddings"
+    )
+    batch <- attributes(combined)$meta.data$batch
+    labels <- attributes(combined)$meta.data$label
+	return(list(latent,batch,labels))
 }
 

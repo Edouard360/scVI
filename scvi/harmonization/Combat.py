@@ -6,7 +6,6 @@ import rpy2.robjects.numpy2ri as numpy2ri
 from scipy.io import mmwrite
 from sklearn.decomposition import PCA
 
-ComBat(X,batch)
 
 class COMBAT():
     def __init__(self):
