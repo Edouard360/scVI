@@ -3,6 +3,45 @@ import scipy
 import torch
 from sklearn.neighbors import NearestNeighbors
 
+from sklearn.cluster import KMeans
+from sklearn.mixture import GaussianMixture as GMM
+from sklearn.metrics import adjusted_rand_score as ARI
+from sklearn.metrics import normalized_mutual_info_score as NMI
+from sklearn.metrics import silhouette_score
+from sklearn.utils.linear_assignment_ import linear_assignment
+
+def unsupervised_clustering_accuracy(y, y_pred):
+    """
+    Unsupervised Clustering Accuracy
+    """
+    assert len(y_pred) == len(y)
+    n_clusters = len(np.unique(y))
+    reward_matrix = np.zeros((n_clusters, n_clusters), dtype=np.int64)
+    for y_pred_, y_ in zip(y_pred, y):
+        reward_matrix[y_pred_, y_] += 1
+    cost_matrix = reward_matrix.max() - reward_matrix
+    ind = linear_assignment(cost_matrix)
+    return sum([reward_matrix[i, j] for i, j in ind]) * 1.0 / y_pred.size, ind
+
+
+
+def clustering_scores(latent, labels, prediction_algorithm='knn', n_labels=None):
+    if n_labels is not None:
+        n_labels = len(np.unique(labels))
+
+    if prediction_algorithm == 'knn':
+        labels_pred = KMeans(n_labels, n_init=200).fit_predict(latent)  # n_jobs>1 ?
+    elif prediction_algorithm == 'gmm':
+        gmm = GMM(n_labels, covariance_type='diag', n_init=200)
+        gmm.fit(latent)
+        labels_pred = gmm.predict(latent)
+
+    return {
+        'asw': silhouette_score(latent, labels),
+        'nmi': NMI(labels, labels_pred),
+        'ari': ARI(labels, labels_pred),
+        'uca': unsupervised_clustering_accuracy(labels, labels_pred)[0]
+    }
 
 def get_latent_mean(vae, data_loader):
     latents, batch_indices, labels = get_latents(vae, data_loader)

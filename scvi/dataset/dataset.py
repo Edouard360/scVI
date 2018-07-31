@@ -197,7 +197,7 @@ class GeneExpressionDataset(Dataset):
         return GeneExpressionDataset(
             *GeneExpressionDataset.get_attributes_from_matrix(
                 pickle_dictionary["X"],
-                batch_index=pickle_dictionary["batch_indices"],
+                batch_indices=pickle_dictionary["batch_indices"],
                 labels=pickle_dictionary["labels"]
             ),
             cell_types=pickle_dictionary["cell_types"],

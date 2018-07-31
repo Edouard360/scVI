@@ -1,7 +1,7 @@
 from .brain_large import BrainLargeDataset
 from .cortex import CortexDataset
 from .dataset import GeneExpressionDataset
-from .synthetic import SyntheticDataset
+from .synthetic import SyntheticDataset, SyntheticSimilar, SyntheticDifferent
 from .cite_seq import CiteSeqDataset, CbmcDataset
 from .pbmc import PbmcDataset, PurifiedPBMCDataset
 from .hemato import HematoDataset
@@ -11,7 +11,7 @@ from .anndata import AnnDataset
 from .csv import CsvDataset, BreastCancerDataset, MouseOBDataset
 from .seqfish import SeqfishDataset
 from .smfish import SmfishDataset
-from .data_loaders import DataLoaders
+from .data_loaders import DataLoaders, SemiSupervisedDataLoaders
 
 __all__ = ['SyntheticDataset',
            'CortexDataset',
@@ -32,4 +32,8 @@ __all__ = ['SyntheticDataset',
            'BreastCancerDataset',
            'MouseOBDataset',
            'DataLoaders',
-           'PurifiedPBMCDataset']
+           'SemiSupervisedDataLoaders',
+           'PurifiedPBMCDataset',
+           'SyntheticSimilar',
+           'SyntheticDifferent'
+           ]
