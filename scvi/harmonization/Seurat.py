@@ -12,20 +12,22 @@ class SEURAT():
         r_source = ro.r['source']
         r_source("scvi/harmonization/R/Seurat.functions.R")
         ro.r["library"]("Matrix")
+    #
+    # def csr2r(self, matrix):
+    #     # because rpy2 don't have sparse encoding try printing it to mtx and reading it in R
+    #     # the object is named X
+    #     mmwrite('temp.mtx',matrix)
+    #     ro.r('X <- readMM("temp.mtx")')
 
-    def csr2r(self, matrix):
-        # because rpy2 don't have sparse encoding try printing it to mtx and reading it in R
-        # the object is named X
-        mmwrite('temp.mtx',matrix)
-        ro.r('X <- readMM("temp.mtx")')
-
-    def create_seurat(self, dataset,batchname):
+    def create_seurat(self, dataset, batchname):
         genenames = dataset.gene_names
         genenames, uniq = np.unique(genenames,return_index=True)
         labels = [dataset.cell_types[int(i)] for i in np.concatenate(dataset.labels)]
         matrix = dataset.X[:,uniq]
-        matrix = matrix.T.tocsr()
-        self.csr2r(matrix)
+        X = np.asarray(matrix.T.todense())
+        nb_genes, n_samples = X.shape
+        X = ro.r.matrix(X, nrow=nb_genes, ncol=n_samples)
+        ro.r.assign('X', X)
         ro.r.assign("batchname", batchname)
         ro.r.assign("genenames", ro.StrVector(genenames))
         ro.r.assign("labels", ro.StrVector(labels))

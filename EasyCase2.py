@@ -51,7 +51,6 @@ from scvi.dataset.cortex import CortexDataset
 gene_dataset = CortexDataset()
 gene_dataset.batch_indices = np.concatenate([np.repeat(0,1000),np.repeat(1,2005)])
 from scvi.harmonization.Combat import COMBAT
-comb
 
 
 if model_type is 'vae':
