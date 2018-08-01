@@ -1,13 +1,13 @@
 import numpy as np
 import scipy
 import torch
-from sklearn.neighbors import NearestNeighbors
-
+from scipy.stats import itemfreq, entropy
 from sklearn.cluster import KMeans
-from sklearn.mixture import GaussianMixture as GMM
 from sklearn.metrics import adjusted_rand_score as ARI
 from sklearn.metrics import normalized_mutual_info_score as NMI
 from sklearn.metrics import silhouette_score
+from sklearn.mixture import GaussianMixture as GMM
+from sklearn.neighbors import NearestNeighbors
 from sklearn.utils.linear_assignment_ import linear_assignment
 
 def unsupervised_clustering_accuracy(y, y_pred):
@@ -22,7 +22,6 @@ def unsupervised_clustering_accuracy(y, y_pred):
     cost_matrix = reward_matrix.max() - reward_matrix
     ind = linear_assignment(cost_matrix)
     return sum([reward_matrix[i, j] for i, j in ind]) * 1.0 / y_pred.size, ind
-
 
 
 def clustering_scores(latent, labels, prediction_algorithm='knn', n_labels=None):
@@ -99,7 +98,7 @@ def select_indices_evenly(n_samples, categorical_indices):
     categorical_indices = categorical_indices.ravel()
     indices = []
     for i in np.unique(categorical_indices):
-        indices_i = np.where(categorical_indices==i)[0]
+        indices_i = np.where(categorical_indices == i)[0]
         indices += [indices_i[np.random.permutation(len(indices_i))][:n_samples]]
     return np.concatenate(indices, axis=0)
 
@@ -120,74 +119,16 @@ def nn_overlap(X1, X2, k=100):
     fold_enrichment = len(set_1.intersection(set_2)) * n_samples ** 2 / (float(len(set_1)) * len(set_2))
     return spearman_correlation, fold_enrichment
 
-
-# CLUSTERING METRICS
-def entropy_batch_mixing_before(latent_space, batches, max_number=500, uniform=False):
-    # latent space: numpy matrix of size (number_of_cells, latent_space_dimension)
-    # with the encoding of the different inputs in the latent space
-    # batches: numpy vector with the batch indices of the cells
-    n_samples = len(latent_space)
-    if uniform:
-        keep_idx = np.random.choice(np.arange(n_samples), size=min(len(latent_space), max_number), replace=False)
-    else:
-        keep_idx = select_indices_evenly(max_number, batches)  # A wiser metric ?
-
-    latent_space, batches = latent_space[keep_idx], batches[keep_idx]
-
-
-    n_samples = latent_space.shape[0]
-    distance = np.zeros((n_samples, n_samples))
-    neighbors_graph = np.zeros((n_samples, n_samples))
-    for i in range(n_samples):
-        for j in range(i, n_samples):
-            distance[i, j] = distance[j, i] = sum((latent_space[i] - latent_space[j]) ** 2)
-
-    for i, d in enumerate(distance):
-        neighbors_graph[i, d.argsort()[:51]] = 1
-    kmatrix = neighbors_graph - np.identity(latent_space.shape[0])
-
-    score = 0
-    for t in range(50):
-        indices = np.random.choice(np.arange(latent_space.shape[0]), size=100)
-        score += np.mean([entropy(
-            batches[kmatrix[indices].nonzero()[1][kmatrix[indices].nonzero()[0] == i]]
-        ) for i in range(100)])
-    return score / 50
-
-
-from sklearn.neighbors import NearestNeighbors
-from scipy.stats import itemfreq, entropy
-
-
-# print()
-# print(entropy_from_indices(batch_indices))
-#
-
-batch_indices = np.random.binomial(1,0.3, size=30)
-
-def entropy_from_indices_before(indices):
-    n_batches = len(np.unique(indices))
-    if n_batches > 2:
-        raise ValueError("Should be only two clusters for this metric")
-    frequency = np.mean(indices == 1)
-    if frequency == 0 or frequency == 1:
-        return 0
-    return -frequency * np.log(frequency) - (1 - frequency) * np.log(1 - frequency)
-
 def entropy_from_indices(indices):
-    return entropy(np.array(itemfreq(indices)[:,1].astype(np.int32)))
+    return entropy(np.array(itemfreq(indices)[:, 1].astype(np.int32)))
 
-def entropy_batch_mixing(latent_space,batches, max_number=1000, uniform=False, n_neighbors=50):
-    if uniform:
-        keep_idx = np.random.choice(np.arange(n_samples), size=min(len(latent_space), max_number), replace=False)
-    else:
-        keep_idx = select_indices_evenly(max_number, batches)  # A wiser metric ?
+def entropy_batch_mixing(latent_space, batches, n_neighbors=50):
     batches = batches.ravel()
-    nbrs = NearestNeighbors(n_neighbors=n_neighbors+1).fit(latent_space)
-    indices = nbrs.kneighbors(latent_space,return_distance=False)[:,1:]
-    batch_indices=np.vectorize(lambda i: batches[i])(indices)
-    return np.mean(np.apply_along_axis(entropy_from_indices,axis=1, arr=batch_indices))
+    nbrs = NearestNeighbors(n_neighbors=n_neighbors + 1).fit(latent_space)
+    indices = nbrs.kneighbors(latent_space, return_distance=False)[:, 1:]
+    batch_indices = np.vectorize(lambda i: batches[i])(indices)
+    return np.mean(np.apply_along_axis(entropy_from_indices, axis=1, arr=batch_indices))
 
 # latent_space = np.random.rand(1000,10)
-# batches = np.random.randint(1, size=1000)
+# batches = np.random.randint(2, size=1000)
 # entropy_batch_mixing(latent_space, batches)
