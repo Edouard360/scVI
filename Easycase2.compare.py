@@ -1,10 +1,9 @@
 use_cuda = True
 from rpy2.robjects.conversion import ri2py, py2ri
+import rpy2.robjects as ro
 import rpy2.robjects.numpy2ri as numpy2ri
 
-import numpy as np
-from scipy.sparse import csr_matrix
-
+from scvi.dataset.BICCN import *
 from scvi.dataset.dataset import GeneExpressionDataset
 
 from scvi.models.vae import VAE
@@ -22,36 +21,17 @@ import seaborn as sns
 from scvi.harmonization.clustering.Seurat import SEURAT
 from scvi.harmonization.clustering.Combat import COMBAT
 from scvi.harmonization.benchmark import knn_purity_avg
-from scvi.metrics.clustering import select_indices_evenly,entropy_batch_mixing
 
-
+from scvi.metrics.clustering import select_indices_evenly,entropy_batch_mixing,clustering_scores
 
 import sys
+
 model_type = str(sys.argv[1])
-plotname = 'simulation.UMI_nonUMI'
-
-# countUMI = np.load('../sim_data/count1.npy')
-# countnonUMI = np.load('../sim_data/count2.npy')
-# labelUMI = np.load('../sim_data/label1.npy')
-# labelnonUMI = np.load('../sim_data/label2.npy')
-
-
-countUMI = np.load('../sim_data/count.UMI.npy')
-countnonUMI = np.load('../sim_data/count.nonUMI.npy')
-labelUMI = np.load('../sim_data/label.UMI.npy')
-labelnonUMI = np.load('../sim_data/label.nonUMI.npy')
-
-UMI = GeneExpressionDataset(
-            *GeneExpressionDataset.get_attributes_from_matrix(
-                csr_matrix(countUMI.T), labels=labelUMI),
-            gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
-
-nonUMI = GeneExpressionDataset(
-            *GeneExpressionDataset.get_attributes_from_matrix(
-                csr_matrix(countnonUMI.T), labels=labelnonUMI),
-            gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
-
-gene_dataset = GeneExpressionDataset.concat_datasets(UMI,nonUMI)
+plotname = 'Macosko_Regev'
+dataset1 = MacoskoDataset()
+dataset2 = RegevDataset()
+gene_dataset = GeneExpressionDataset.concat_datasets(dataset1, dataset2)
+gene_dataset.subsample_genes(5000)
 
 if model_type == 'vae':
     vae = VAE(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches, n_labels=gene_dataset.n_labels,
@@ -77,9 +57,9 @@ elif model_type == 'svaec':
     keys = gene_dataset.cell_types
 elif model_type == 'Seurat':
     SEURAT = SEURAT()
-    seurat1 = SEURAT.create_seurat(UMI, 0)
-    seurat2 = SEURAT.create_seurat(nonUMI, 1)
-    latent, batch_indices,labels = SEURAT.combine_seurat(seurat1, seurat2)
+    SEURAT.create_seurat(dataset1, 1)
+    SEURAT.create_seurat(dataset2, 2)
+    latent, batch_indices,labels,cell_types = SEURAT.get_cca()
     numpy2ri.activate()
     latent  = ri2py(latent)
     batch_indices  = ri2py(batch_indices)
@@ -90,7 +70,7 @@ elif model_type == 'Seurat':
     labels = np.array(labels)
 elif model_type == 'Combat':
     COMBAT = COMBAT()
-# corrected = COMBAT.combat_correct(gene_dataset)
+    # corrected = COMBAT.combat_correct(gene_dataset)
     latent = COMBAT.combat_pca(gene_dataset)
     latent = latent.T
     batch_indices = np.concatenate(gene_dataset.batch_indices)
@@ -105,15 +85,19 @@ print("Entropy batch mixing :", batch_entropy)
 if model_type == 'svaec':
     svaec_acc = compute_accuracy(svaec, data_loader, classifier=svaec.classifier)
 
-
+labels = labels.astype('int')
 sample = select_indices_evenly(1000,labels)
-res = knn_purity_avg(
+res = clustering_scores(np.asarray(latent)[sample,:],labels[sample],'knn',len(np.unique(labels[sample])))
+
+for x in res:
+    print(x,res[x])
+
+knn = knn_purity_avg(
     latent[sample, :], labels[sample].astype('int'),
     keys=keys, acc=True
 )
-
 print('average classification accuracy per cluster')
-for x in res:
+for x in knn:
     print(x)
 
 knn_acc = np.mean([x[1] for x in res])
@@ -126,7 +110,13 @@ label_s = labels[sample]
 if latent_s.shape[1] != 2:
     latent_s = TSNE().fit_transform(latent_s)
 
-colors = sns.color_palette('tab10',5)
+plt.figure(figsize=(10, 10))
+plt.scatter(latent_s[:, 0], latent_s[:, 1], c=batch_s, edgecolors='none')
+plt.axis("off")
+plt.tight_layout()
+plt.savefig('../' + plotname + '.' + model_type + '.batch.png')
+
+colors = sns.color_palette('tab20',len(unique(labels_s)))
 fig, ax = plt.subplots(figsize=(10, 10))
 for i, k in enumerate(keys):
     ax.scatter(latent_s[label_s == i, 0], latent_s[label_s == i, 1], c=colors[i], label=k, edgecolors='none')
@@ -135,8 +125,3 @@ ax.legend()
 fig.tight_layout()
 fig.savefig('../' + plotname + '.' + model_type + '.label.png', dpi=fig.dpi)
 
-plt.figure(figsize=(10, 10))
-plt.scatter(latent_s[:, 0], latent_s[:, 1], c=batch_s, edgecolors='none')
-plt.axis("off")
-plt.tight_layout()
-plt.savefig('../' + plotname + '.' + model_type + '.batch.png')
