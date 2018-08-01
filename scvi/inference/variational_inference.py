@@ -19,6 +19,7 @@ from scvi.metrics.imputation import imputation, plot_imputation
 from scvi.metrics.log_likelihood import compute_log_likelihood
 from . import Inference, ClassifierInference
 
+import seaborn as sns
 plt.switch_backend('agg')
 
 
@@ -139,6 +140,7 @@ class VariationalInference(Inference):
 
     def show_t_sne(self, name, n_samples=1000, color_by='', save_name='', uniform=False):
         latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])
+        colors = sns.color_palette('tab20', 20)
         if uniform:
             idx_t_sne = np.random.permutation(len(latent))[:n_samples] if n_samples else np.arange(len(latent))
         else:
@@ -176,7 +178,7 @@ class VariationalInference(Inference):
                 else:
                     plt_labels = [str(i) for i in range(len(np.unique(indices)))]
                 for i, cell_type in zip(range(self.gene_dataset.n_labels), plt_labels):
-                    axes[1].scatter(latent[indices == i, 0], latent[indices == i, 1], label=cell_type)
+                    axes[1].scatter(latent[indices == i, 0], latent[indices == i, 1], label=cell_type, c=colors[i%20])
                 axes[1].set_title("label coloring")
                 axes[1].axis("off")
                 axes[1].legend()

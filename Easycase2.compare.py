@@ -49,28 +49,18 @@ elif model_type == 'svaec':
                   n_latent=10,n_layers=2)
     infer = SemiSupervisedVariationalInference(svaec, gene_dataset)
     infer.train(n_epochs=50)
-    infer.accuracy('unlabelled')
+    print('svaec acc =', infer.accuracy('unlabelled'))
     data_loader = infer.data_loaders['unlabelled']
     latent, batch_indices, labels = get_latent(infer.model, infer.data_loaders['unlabelled'])
     keys = gene_dataset.cell_types
     batch_indices = np.concatenate(batch_indices)
-    keys = gene_dataset.cell_types
 elif model_type == 'Seurat':
     SEURAT = SEURAT()
-    SEURAT.create_seurat(dataset1, 1)
-    SEURAT.create_seurat(dataset2, 2)
-    latent, batch_indices,labels,cell_types = SEURAT.get_cca()
-    numpy2ri.activate()
-    latent  = ri2py(latent)
-    batch_indices  = ri2py(batch_indices)
-    labels  = ri2py(labels)
-    keys,labels = np.unique(labels,return_inverse=True)
-    latent  = np.array(latent)
-    batch_indices  = np.array(batch_indices)
-    labels = np.array(labels)
+    seurat1 = SEURAT.create_seurat(dataset1, 1)
+    seurat2 = SEURAT.create_seurat(dataset2, 2)
+    latent, batch_indices,labels,keys = SEURAT.get_cca()
 elif model_type == 'Combat':
     COMBAT = COMBAT()
-    # corrected = COMBAT.combat_correct(gene_dataset)
     latent = COMBAT.combat_pca(gene_dataset)
     latent = latent.T
     batch_indices = np.concatenate(gene_dataset.batch_indices)
@@ -78,50 +68,24 @@ elif model_type == 'Combat':
     keys = gene_dataset.cell_types
 
 
+
 sample = select_indices_evenly(2000,batch_indices)
 batch_entropy = entropy_batch_mixing(latent[sample, :], batch_indices[sample])
 print("Entropy batch mixing :", batch_entropy)
 
-if model_type == 'svaec':
-    svaec_acc = compute_accuracy(svaec, data_loader, classifier=svaec.classifier)
 
-labels = labels.astype('int')
 sample = select_indices_evenly(1000,labels)
-res = clustering_scores(np.asarray(latent)[sample,:],labels[sample],'knn',len(np.unique(labels[sample])))
+res = knn_purity_avg(
+    latent[sample, :], labels[sample],
+    keys=keys[np.unique(labels)], acc=True
+)
 
+print('average classification accuracy per cluster',np.mean([x[1] for x in res]))
+for x in res:
+    print(x)
+
+res = clustering_scores(np.asarray(latent)[sample,:],labels[sample],'knn',len(np.unique(labels[sample])))
 for x in res:
     print(x,res[x])
 
-knn = knn_purity_avg(
-    latent[sample, :], labels[sample].astype('int'),
-    keys=keys, acc=True
-)
-print('average classification accuracy per cluster')
-for x in knn:
-    print(x)
-
-knn_acc = np.mean([x[1] for x in res])
-print("average KNN accuracy:", knn_acc)
-
-sample = select_indices_evenly(1000,labels)
-latent_s = latent[sample, :]
-batch_s = batch_indices[sample]
-label_s = labels[sample]
-if latent_s.shape[1] != 2:
-    latent_s = TSNE().fit_transform(latent_s)
-
-plt.figure(figsize=(10, 10))
-plt.scatter(latent_s[:, 0], latent_s[:, 1], c=batch_s, edgecolors='none')
-plt.axis("off")
-plt.tight_layout()
-plt.savefig('../' + plotname + '.' + model_type + '.batch.png')
-
-colors = sns.color_palette('tab20',len(unique(labels_s)))
-fig, ax = plt.subplots(figsize=(10, 10))
-for i, k in enumerate(keys):
-    ax.scatter(latent_s[label_s == i, 0], latent_s[label_s == i, 1], c=colors[i], label=k, edgecolors='none')
-
-ax.legend()
-fig.tight_layout()
-fig.savefig('../' + plotname + '.' + model_type + '.label.png', dpi=fig.dpi)
-
+infer.show_t_sne(color_by="batches and labels")
