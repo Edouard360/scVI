@@ -135,7 +135,7 @@ def knn_purity_avg(latent, label, keys, n_sample=1000,acc=False):
                 score.append(0)
     score = np.asarray(score)
     res = [np.mean(np.asarray(score)[label == i]) for i in np.unique(label)]
-    res = [[keys[i], res[i], np.sum(label==i)] for i in np.unique(label)]
+    res = [[keys[i], res[i], np.sum(label == k)] for i,k in enumerate(np.unique(label))]
     return res
 
 

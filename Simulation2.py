@@ -28,13 +28,7 @@ from scvi.metrics.clustering import select_indices_evenly,entropy_batch_mixing
 
 import sys
 model_type = str(sys.argv[1])
-plotname = 'simulation.UMI_nonUMI'
-
-# countUMI = np.load('../sim_data/count1.npy')
-# countnonUMI = np.load('../sim_data/count2.npy')
-# labelUMI = np.load('../sim_data/label1.npy')
-# labelnonUMI = np.load('../sim_data/label2.npy')
-
+plotname = 'EVFbatch_simulation'
 
 countUMI = np.load('../sim_data/count.UMI.npy')
 countnonUMI = np.load('../sim_data/count.nonUMI.npy')

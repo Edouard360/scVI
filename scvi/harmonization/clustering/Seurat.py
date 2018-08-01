@@ -42,11 +42,8 @@ class SEURAT():
 
     def get_cca(self):
         ro.r('combined <- hvg_CCA(seurat1,seurat2)')
-        command ='GetDimReduction(object=combined,' + \
-        'reduction.type = "cca.aligned",' + \
-        'slot = "cell.embeddings")'
-        latent = ro.r(command)
-        labels = ro.r('combined@meta.data$label')
-        batch_indices = ro.r('combined@meta.data$batch')
+        latent = ro.r('combined[[1]]')
+        labels = ro.r('combined[[3]]')
+        batch_indices = ro.r('combined[[2]]')
         cell_types,labels = np.unique(labels,return_inverse=True)
         return latent,batch_indices,labels,cell_types

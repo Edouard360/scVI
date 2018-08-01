@@ -22,35 +22,45 @@ import seaborn as sns
 from scvi.harmonization.clustering.Seurat import SEURAT
 from scvi.harmonization.clustering.Combat import COMBAT
 from scvi.harmonization.benchmark import knn_purity_avg
-from scvi.metrics.clustering import select_indices_evenly,entropy_batch_mixing
+from scvi.metrics.clustering import select_indices_evenly,entropy_batch_mixing,clustering_scores
 
 
 
 import sys
 model_type = str(sys.argv[1])
-plotname = 'simulation.UMI_nonUMI'
+plotname = 'simulation.linear'
 
-# countUMI = np.load('../sim_data/count1.npy')
-# countnonUMI = np.load('../sim_data/count2.npy')
-# labelUMI = np.load('../sim_data/label1.npy')
-# labelnonUMI = np.load('../sim_data/label2.npy')
+countUMI = np.load('../sim_data/count1.npy')
+countnonUMI = np.load('../sim_data/count2.npy')
+labelUMI = np.load('../sim_data/label1.npy')
+labelnonUMI = np.load('../sim_data/label2.npy')
 
-
-countUMI = np.load('../sim_data/count.UMI.npy')
-countnonUMI = np.load('../sim_data/count.nonUMI.npy')
-labelUMI = np.load('../sim_data/label.UMI.npy')
-labelnonUMI = np.load('../sim_data/label.nonUMI.npy')
 
 UMI = GeneExpressionDataset(
             *GeneExpressionDataset.get_attributes_from_matrix(
-                csr_matrix(countUMI.T), labels=labelUMI),
+                csr_matrix(countUMI), labels=labelUMI),
             gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
 
 nonUMI = GeneExpressionDataset(
             *GeneExpressionDataset.get_attributes_from_matrix(
-                csr_matrix(countnonUMI.T), labels=labelnonUMI),
+                csr_matrix(countnonUMI), labels=labelnonUMI),
             gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
 
+
+# countUMI = np.load('../sim_data/count.UMI.npy')
+# countnonUMI = np.load('../sim_data/count.nonUMI.npy')
+# labelUMI = np.load('../sim_data/label.UMI.npy')
+# labelnonUMI = np.load('../sim_data/label.nonUMI.npy')
+#
+# UMI = GeneExpressionDataset(
+#             *GeneExpressionDataset.get_attributes_from_matrix(
+#                 csr_matrix(countUMI.T), labels=labelUMI),
+#             gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
+#
+# nonUMI = GeneExpressionDataset(
+#             *GeneExpressionDataset.get_attributes_from_matrix(
+#                 csr_matrix(countnonUMI.T), labels=labelnonUMI),
+#             gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
 gene_dataset = GeneExpressionDataset.concat_datasets(UMI,nonUMI)
 
 if model_type == 'vae':
@@ -77,17 +87,10 @@ elif model_type == 'svaec':
     keys = gene_dataset.cell_types
 elif model_type == 'Seurat':
     SEURAT = SEURAT()
-    seurat1 = SEURAT.create_seurat(UMI, 0)
-    seurat2 = SEURAT.create_seurat(nonUMI, 1)
-    latent, batch_indices,labels = SEURAT.combine_seurat(seurat1, seurat2)
-    numpy2ri.activate()
-    latent  = ri2py(latent)
-    batch_indices  = ri2py(batch_indices)
-    labels  = ri2py(labels)
-    keys,labels = np.unique(labels,return_inverse=True)
-    latent  = np.array(latent)
-    batch_indices  = np.array(batch_indices)
-    labels = np.array(labels)
+    #The batch id number HAS to be 1 and 2
+    seurat1 = SEURAT.create_seurat(UMI, 1)
+    seurat2 = SEURAT.create_seurat(nonUMI, 2)
+    latent, batch_indices,labels,keys = SEURAT.get_cca()
 elif model_type == 'Combat':
     COMBAT = COMBAT()
 # corrected = COMBAT.combat_correct(gene_dataset)
@@ -101,9 +104,6 @@ elif model_type == 'Combat':
 sample = select_indices_evenly(2000,batch_indices)
 batch_entropy = entropy_batch_mixing(latent[sample, :], batch_indices[sample])
 print("Entropy batch mixing :", batch_entropy)
-
-if model_type == 'svaec':
-    svaec_acc = compute_accuracy(svaec, data_loader, classifier=svaec.classifier)
 
 
 sample = select_indices_evenly(1000,labels)
@@ -140,3 +140,8 @@ plt.scatter(latent_s[:, 0], latent_s[:, 1], c=batch_s, edgecolors='none')
 plt.axis("off")
 plt.tight_layout()
 plt.savefig('../' + plotname + '.' + model_type + '.batch.png')
+
+res = clustering_scores(np.asarray(latent)[sample,:],labels[sample],'knn',len(np.unique(labels[sample])))
+for x in res:
+    print(x,res[x])
+
