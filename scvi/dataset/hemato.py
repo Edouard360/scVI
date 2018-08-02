@@ -59,3 +59,17 @@ class HematoDataset(GeneExpressionDataset):
 
         print("Finished preprocessing Hemato data")
         return expression_data, gene_names
+
+
+class MyeloidDataset(GeneExpressionDataset):
+
+    def __init__(self,save_path = 'data/Myeloid'):
+        self.save_path = save_path
+        self.urls = ["ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE72nnn/GSE72857/suppl/GSE72857_umitab.txt.gz",
+                     "ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE72nnn/GSE72857/suppl/GSE72857_experimental_design.txt.gz"]
+        self.download_names = ["GSE72857_umitab.txt.gz","GSE72857_experimental_design.txt.gz	"]
+
+
+#
+# import numpy as np
+# gene_order = np.genfromtxt('Tusi/genes.csv',delimiter='')

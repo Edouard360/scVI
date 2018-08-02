@@ -119,28 +119,6 @@ for x in res:
 knn_acc = np.mean([x[1] for x in res])
 print("average KNN accuracy:", knn_acc)
 
-sample = select_indices_evenly(1000,labels)
-latent_s = latent[sample, :]
-batch_s = batch_indices[sample]
-label_s = labels[sample]
-if latent_s.shape[1] != 2:
-    latent_s = TSNE().fit_transform(latent_s)
-
-colors = sns.color_palette('tab10',5)
-fig, ax = plt.subplots(figsize=(10, 10))
-for i, k in enumerate(keys):
-    ax.scatter(latent_s[label_s == i, 0], latent_s[label_s == i, 1], c=colors[i], label=k, edgecolors='none')
-
-ax.legend()
-fig.tight_layout()
-fig.savefig('../' + plotname + '.' + model_type + '.label.png', dpi=fig.dpi)
-
-plt.figure(figsize=(10, 10))
-plt.scatter(latent_s[:, 0], latent_s[:, 1], c=batch_s, edgecolors='none')
-plt.axis("off")
-plt.tight_layout()
-plt.savefig('../' + plotname + '.' + model_type + '.batch.png')
-
 res = clustering_scores(np.asarray(latent)[sample,:],labels[sample],'knn',len(np.unique(labels[sample])))
 for x in res:
     print(x,res[x])

@@ -1,6 +1,4 @@
 use_cuda = True
-from rpy2.robjects.conversion import ri2py, py2ri
-import rpy2.robjects.numpy2ri as numpy2ri
 from scvi.harmonization.utils_chenling import get_matrix_from_dir
 from scvi.harmonization.benchmark import assign_label
 import numpy as np
@@ -13,10 +11,6 @@ from scvi.models.svaec import SVAEC
 from scvi.inference.variational_inference import VariationalInference
 from scvi.inference.variational_inference import SemiSupervisedVariationalInference
 from scvi.metrics.clustering import get_latent
-
-import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE
-import seaborn as sns
 
 from scvi.harmonization.clustering.Seurat import SEURAT
 from scvi.harmonization.clustering.Combat import COMBAT
@@ -104,7 +98,7 @@ print('average classification accuracy per cluster',np.mean([x[1] for x in res])
 for x in res:
     print(x)
 
-res = clustering_scores(np.asarray(latent)[sample,:],labels[sample],'knn',len(np.unique(labels[sample])))
+res = clustering_scores(np.asarray(latent)[sample,:],labels[sample],'gmm',len(np.unique(labels[sample])))
 for x in res:
     print(x,res[x])
 

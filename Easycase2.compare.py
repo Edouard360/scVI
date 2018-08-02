@@ -36,9 +36,9 @@ gene_dataset.subsample_genes(5000)
 if model_type == 'vae':
     vae = VAE(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches, n_labels=gene_dataset.n_labels,
               n_hidden=128, n_latent=10, n_layers=2, dispersion='gene')
-    infer_vae = VariationalInference(vae, gene_dataset, use_cuda=use_cuda)
-    infer_vae.train(n_epochs=250)
-    data_loader = infer_vae.data_loaders['sequential']
+    infer = VariationalInference(vae, gene_dataset, use_cuda=use_cuda)
+    infer.train(n_epochs=250)
+    data_loader = infer.data_loaders['sequential']
     latent, batch_indices, labels = get_latent(vae, data_loader)
     keys = gene_dataset.cell_types
     batch_indices = np.concatenate(batch_indices)
@@ -55,10 +55,14 @@ elif model_type == 'svaec':
     keys = gene_dataset.cell_types
     batch_indices = np.concatenate(batch_indices)
 elif model_type == 'Seurat':
-    SEURAT = SEURAT()
-    seurat1 = SEURAT.create_seurat(dataset1, 1)
-    seurat2 = SEURAT.create_seurat(dataset2, 2)
-    latent, batch_indices,labels,keys = SEURAT.get_cca()
+    # SEURAT = SEURAT()
+    # seurat1 = SEURAT.create_seurat(dataset1, 1)
+    # seurat2 = SEURAT.create_seurat(dataset2, 2)
+    # latent, batch_indices,labels,keys = SEURAT.get_cca()
+    latent = np.genfromtxt('../macosko_regev.CCA.txt')
+    label = np.genfromtxt('../macosko_regev.CCA.label.txt',dtype='str')
+    keys = gene_dataset.cell_types
+    batch_indices = np.genfromtxt('../macosko_regev.CCA.batch.txt')
 elif model_type == 'Combat':
     COMBAT = COMBAT()
     latent = COMBAT.combat_pca(gene_dataset)

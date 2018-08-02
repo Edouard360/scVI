@@ -15,14 +15,15 @@ def unsupervised_clustering_accuracy(y, y_pred):
     Unsupervised Clustering Accuracy
     """
     assert len(y_pred) == len(y)
-    n_clusters = len(np.unique(y))
+    u = np.unique(y)
+    n_clusters = len(u)
+    mapping = dict(zip(u, range(n_clusters)))
     reward_matrix = np.zeros((n_clusters, n_clusters), dtype=np.int64)
     for y_pred_, y_ in zip(y_pred, y):
-        reward_matrix[y_pred_, y_] += 1
+        reward_matrix[mapping[y_pred_], mapping[y_]] += 1
     cost_matrix = reward_matrix.max() - reward_matrix
     ind = linear_assignment(cost_matrix)
     return sum([reward_matrix[i, j] for i, j in ind]) * 1.0 / y_pred.size, ind
-
 
 def clustering_scores(latent, labels, prediction_algorithm='knn', n_labels=None):
     if n_labels is not None:

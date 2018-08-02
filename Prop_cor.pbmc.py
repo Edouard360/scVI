@@ -1,50 +1,55 @@
-use_cuda = True
+from scvi.dataset import GeneExpressionDataset
 
+use_cuda = True
+import math
 from numpy.random import uniform
+from copy import deepcopy
+from scvi.harmonization.benchmark import sample_by_batch
+from scvi.harmonization.utils_chenling import get_matrix_from_dir
+from scvi.harmonization.benchmark import assign_label
 import numpy as np
 from scvi.dataset.dataset import GeneExpressionDataset
-from scvi.dataset.BICCN import MacoskoDataset, RegevDataset
-from copy import deepcopy
 from scvi.models.vae import VAE
-from scvi.inference import VariationalInference
-from scvi.harmonization.benchmark import sample_by_batch
-from scvi.metrics.clustering import select_indices_evenly, entropy_batch_mixing, clustering_scores
+from scvi.inference.variational_inference import VariationalInference
 from scvi.harmonization.benchmark import knn_purity_avg
+from scvi.metrics.clustering import select_indices_evenly,entropy_batch_mixing,clustering_scores
 
-import math
 import sys
 
-min = float(sys.argv[1])
-max = float(sys.argv[2])
+low = float(sys.argv[1])
+high = float(sys.argv[2])
 
-dataset1 = MacoskoDataset()
-dataset2 = RegevDataset()
-gene_dataset = GeneExpressionDataset.concat_datasets(dataset1, dataset2)
+count, geneid, cellid = get_matrix_from_dir('pbmc8k')
+geneid = geneid[:, 1]
+count = count.T.tocsr()
+seurat = np.genfromtxt('../pbmc8k/pbmc8k.seurat.labels', dtype='str', delimiter=',')
+cellid = np.asarray([x.split('-')[0] for x in cellid])
+labels_map = [0, 2, 4, 4, 0, 3, 3, 1, 5, 6]
+cell_type = ["CD4+ T Helper2", "CD56+ NK", "CD14+ Monocyte", "CD19+ B", "CD8+ Cytotoxic T", "FCGR3A Monocyte",
+             "dendritic"]
+dataset1 = assign_label(cellid, geneid, labels_map, count, cell_type, seurat)
+
+count, geneid, cellid = get_matrix_from_dir('cite')
+count = count.T.tocsr()
+seurat = np.genfromtxt('../cite/cite.seurat.labels', dtype='str', delimiter=',')
+cellid = np.asarray([x.split('-')[0] for x in cellid])
+labels_map = [0, 0, 1, 2, 3, 4, 5, 6]
+cell_type = ["CD4+ T Helper2", "CD56+ NK", "CD14+ Monocyte", "CD19+ B", "CD8+ Cytotoxic T", "FCGR3A Monocyte", "na"]
+dataset2 = assign_label(cellid, geneid, labels_map, count, cell_type, seurat)
+gene_dataset: GeneExpressionDataset = GeneExpressionDataset.concat_datasets(dataset1, dataset2)
 gene_dataset.subsample_genes(5000)
 
-batch_id = np.concatenate(gene_dataset.batch_indices)
-cell_type = gene_dataset.cell_types
-groups = ['Pvalb', 'L2/3', 'Sst', 'L5 PT', 'L5 IT Tcap', 'L5 IT Aldh1a7', 'L5 IT Foxp2', 'L5 NP',
-          'L6 IT', 'L6 CT', 'L6 NP', 'L6b', 'Lamp5', 'Vip', 'Astro', 'OPC', 'VLMC', 'Oligo', 'Sncg', 'Endo',
-          'SMC', 'MICRO']
-cell_type = [x.upper() for x in cell_type]
-groups = [x.upper() for x in groups]
-labels = np.asarray([cell_type[x] for x in np.concatenate(gene_dataset.labels).astype('int')])
-cell_type_bygroup = np.concatenate([[x for x in cell_type if x.startswith(y)] for y in groups])
-new_labels_dict = dict(zip(cell_type_bygroup, np.arange(len(cell_type_bygroup))))
-new_labels = np.asarray([new_labels_dict[x] for x in labels])
-labels_groups = [[i for i, x in enumerate(groups) if y.startswith(x)][0] for y in cell_type_bygroup]
-coarse_labels_dict = dict(zip(np.arange(len(labels_groups)), labels_groups))
-coarse_labels = np.asarray([coarse_labels_dict[x] for x in new_labels])
-gene_dataset.cell_types = np.asarray(groups)[np.unique(coarse_labels)]
-gene_dataset.labels = np.unique(coarse_labels, return_inverse=True)[1].reshape(len(coarse_labels,1))
+rmCellTypes = {'na', 'dendritic'}
+newCellType = [k for i, k in enumerate(gene_dataset.cell_types) if k not in rmCellTypes]
+gene_dataset.filter_cell_types(newCellType)
 
 for prob_i in range(50):
-    correlation = min - 0.01
-    while (correlation < min or correlation > max):
-        cellid = np.arange(0, len(batch_id))
-        cell_types = gene_dataset.cell_types
-        labels = np.concatenate(gene_dataset.labels)
+    labels = np.concatenate(gene_dataset.labels)
+    batch_id = np.concatenate(gene_dataset.batch_indices)
+    cell_types = gene_dataset.cell_types
+    cellid = np.arange(0, len(batch_id))
+    correlation = low - 0.01
+    while (correlation < low or correlation > high):
         count = []
         cells = []
         for batch in [0, 1]:
@@ -75,7 +80,6 @@ for prob_i in range(50):
         latent[sample, :], labels[sample].astype('int'),
         keys=keys, acc=True
     )
-    print('average classification accuracy per cluster')
     for x in res:
         print(x)
     knn_acc = np.mean([x[1] for x in res])
