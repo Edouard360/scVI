@@ -1,13 +1,15 @@
 import itertools
 import os
 import pickle
+import copy
+import numpy as np
 
 from scvi.dataset import *
 from scvi.harmonization import SCMAP
 from scvi.inference import *
 from scvi.models import *
 
-experiment_number = 11
+experiment_number = 12
 # experiment-10:
 # nb_genes = 800
 # batch_size=512 : Alternate : lr_classification = 1e-2 : n_layers = 3 : n_hidden_classifier = 512 : nb_genes = 800
@@ -16,6 +18,10 @@ experiment_number = 11
 # experiment-11:
 # nb_genes = 600
 # batch_size=512 : Alternate : lr_classification = 1e-2 :  n_layers = 2 : n_hidden_classifier = 256
+
+# experiment-12:
+# nb_genes = 600
+# batch_size=128 : Joint : lr_classification = 5*1e-3 :  n_layers = 2 : n_hidden_classifier = 256
 
 
 filename_svaec = '4d-svaec-results-%i.pickle' % experiment_number
@@ -36,7 +42,7 @@ dataset_.filter_cell_types(all_cell_types)
 index = {'xin': 0, 'segerstolpe': 1, 'muraro': 2, 'baron': 3}
 
 
-def split_data(original_dataset, sources, target, nb_genes=1500):
+def split_data(original_dataset, sources, target, nb_genes=1500, batch_size=128):
     dataset = copy.deepcopy(original_dataset)
     dataset.update_cells(
         (sum([dataset.batch_indices == s for s in sources + (target,)]).astype(np.bool).ravel()))
@@ -51,7 +57,7 @@ def split_data(original_dataset, sources, target, nb_genes=1500):
 
     print(dataset)
 
-    data_loaders = SemiSupervisedDataLoaders(dataset, batch_size=512)  # batch_size=512 ?
+    data_loaders = SemiSupervisedDataLoaders(dataset, batch_size=batch_size)  # batch_size=512 ?
     all_weights = np.ones(len(dataset))
     indices_source = sum((dataset.batch_indices == source).ravel() for source in sources).astype(np.bool)
     data_loaders['labelled'] = data_loaders(indices=indices_source)
@@ -67,7 +73,7 @@ def split_data(original_dataset, sources, target, nb_genes=1500):
     #
     # data_loaders['all_weighted'] = data_loaders(weights=all_weights)
 
-    data_loaders.loop = ['all']  # , 'labelled']  # _weighted
+    data_loaders.loop = ['all', 'labelled']  #   # _weighted
     # ['all_weighted', 'labelled_weighted']#'] # maybe labelled_weighted ?
 
     (X_train, labels_train), = data_loaders.raw_data(data_loaders['labelled'])
@@ -78,6 +84,7 @@ def split_data(original_dataset, sources, target, nb_genes=1500):
 
 names = ['xin', 'segerstolpe', 'muraro', 'baron']
 nb_genes = 600
+batch_size = 128
 
 for i in range(3, 0, -1):
     for sources in list(itertools.combinations(range(0, 4), i)):
@@ -92,19 +99,20 @@ for i in range(3, 0, -1):
             title = "%s -> %s" % (' '.join([names[s] for s in sources]), names[target])
             dataset, data_loaders, (X_train, labels_train, X_test, labels_test) = split_data(dataset_, sources,
                                                                                              target,
-                                                                                             nb_genes=nb_genes)
+                                                                                             nb_genes=nb_genes,
+                                                                                             batch_size=batch_size)
 
             svaec = SVAEC(dataset.nb_genes, dataset.n_batches, dataset.n_labels,
                           n_layers=2, dropout_rate=0.1, decoder_scvi_parameters={'n_layers': 2},
                           classifier_parameters={'n_layers': 2, 'n_hidden': 256})
 
-            # infer = SemiSupervisedVariationalInference(svaec, dataset, frequency=10, verbose=True,
-            #                                            classification_ratio=1,
-            #                                            n_epochs_classifier=1, lr_classification=5*1e-3)
+            infer = SemiSupervisedVariationalInference(svaec, dataset, frequency=100, verbose=True,
+                                                       classification_ratio=1,
+                                                       n_epochs_classifier=1, lr_classification=5*1e-3)
 
-            infer = AlternateSemiSupervisedVariationalInference(svaec, dataset, lr_classification=1e-2,
-                                                                n_epochs_classifier=1,
-                                                                frequency=100, verbose=True)
+            # infer = AlternateSemiSupervisedVariationalInference(svaec, dataset, lr_classification=1e-2,
+            #                                                     n_epochs_classifier=1,
+            #                                                     frequency=100, verbose=True)
             infer.data_loaders = data_loaders
             infer.classifier_inference.data_loaders['train'] = data_loaders['labelled']
             infer.metrics_to_monitor = ['accuracy', 'll', 'nn_latentspace']

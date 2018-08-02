@@ -1,3 +1,5 @@
+from scvi.harmonization import SCMAP
+
 use_cuda = True
 from rpy2.robjects.conversion import ri2py, py2ri
 import rpy2.robjects as ro
@@ -10,7 +12,7 @@ from scvi.dataset.dataset import GeneExpressionDataset
 from scvi.models.vae import VAE
 from scvi.models.svaec import SVAEC
 
-from scvi.inference import VariationalInference,JointSemiSupervisedVariationalInference
+from scvi.inference import *
 
 from scvi.metrics.clustering import get_latent
 from scvi.metrics.classification import compute_accuracy
@@ -19,11 +21,10 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 import seaborn as sns
 
-from scvi.harmonization.Seurat import SEURAT
-from scvi.harmonization.Combat import COMBAT
+from scvi.harmonization import SEURAT, COMBAT
 from scvi.harmonization.benchmark import knn_purity_avg
 from scvi.metrics.clustering import select_indices_evenly,entropy_batch_mixing
-
+from scvi.dataset.data_loaders import SemiSupervisedDataLoaders
 
 
 import sys
@@ -36,22 +37,36 @@ plotname = 'simulation.UMI_nonUMI'
 # labelnonUMI = np.load('../sim_data/label2.npy')
 
 
-countUMI = np.load('../sim_data/count.UMI.npy')
-countnonUMI = np.load('../sim_data/count.nonUMI.npy')
-labelUMI = np.load('../sim_data/label.UMI.npy')
-labelnonUMI = np.load('../sim_data/label.nonUMI.npy')
+countUMI = np.load('../sim_data/count.UMI.npy').T
+countnonUMI = np.load('../sim_data/count.nonUMI.npy').T
+labelUMI = np.load('../sim_data/label.UMI.npy').astype(np.int)
+labelnonUMI = np.load('../sim_data/label.nonUMI.npy').astype(np.int)
 
 UMI = GeneExpressionDataset(
             *GeneExpressionDataset.get_attributes_from_matrix(
-                csr_matrix(countUMI.T), labels=labelUMI),
+                csr_matrix(countUMI), labels=labelUMI),
             gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
 
 nonUMI = GeneExpressionDataset(
             *GeneExpressionDataset.get_attributes_from_matrix(
-                csr_matrix(countnonUMI.T), labels=labelnonUMI),
+                csr_matrix(countnonUMI), labels=labelnonUMI),
             gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
 
 gene_dataset = GeneExpressionDataset.concat_datasets(UMI,nonUMI)
+
+for i in [0,1]:
+    svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
+                  gene_dataset.n_labels, n_layers=2)
+    infer = SemiSupervisedVariationalInference(svaec, gene_dataset)
+    data_loaders = SemiSupervisedDataLoaders(gene_dataset)
+    data_loaders['labelled'] = data_loaders(indices=(gene_dataset.batch_indices==i).ravel())
+    data_loaders['unlabelled'] = data_loaders(indices=(gene_dataset.batch_indices==(1-i)).ravel())
+    infer.data_loaders = data_loaders
+    infer.train(n_epochs=100)
+    if i==0:
+        print("Score UMI->nonUMI:",infer.accuracy('unlabelled'))
+    else:
+        print("Score nonUMI->UMI:", infer.accuracy('unlabelled'))
 
 if model_type == 'vae':
     vae = VAE(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches, n_labels=gene_dataset.n_labels,
@@ -137,3 +152,13 @@ plt.scatter(latent_s[:, 0], latent_s[:, 1], c=batch_s, edgecolors='none')
 plt.axis("off")
 plt.tight_layout()
 plt.savefig('../' + plotname + '.' + model_type + '.batch.png')
+
+# Make sure countUMI = countUMI.T and labelUMI =labelUMI.astype(np.int) // same for countnonUMI...
+print("Starting scmap")
+scmap = SCMAP()
+scmap.set_parameters(n_features=500)
+scmap.fit_scmap_cluster(countUMI, labelUMI)
+print("Score UMI->nonUMI:",scmap.score(countnonUMI, labelnonUMI))
+
+scmap.fit_scmap_cluster(countnonUMI, labelnonUMI)
+print("Score nonUMI->UMI:", scmap.score(countUMI, labelUMI))

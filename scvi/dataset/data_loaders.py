@@ -88,7 +88,7 @@ class DataLoaders:
         data_loaders_loop = [self[name] for name in self.loop]
         return zip(data_loaders_loop[0], *[cycle(data_loader) for data_loader in data_loaders_loop[1:]])
 
-    def __call__(self, shuffle=False, indices=None, weighted=False, scale=50):
+    def __call__(self, shuffle=False, indices=None, weights=False, scale=50):
         if indices is not None and shuffle:
             raise ValueError('indices is mutually exclusive with shuffle')
         if indices is None:
@@ -99,10 +99,11 @@ class DataLoaders:
         else:
             if hasattr(indices, 'dtype') and indices.dtype is np.dtype('bool'):
                 indices = np.where(indices)[0].ravel()
-            if weighted is False:
+            if weights is False:
                 sampler = SubsetRandomSampler(indices)
             else:
-                if weighted is True:
+                if weights is True: # weights by label on the indices given
+                    assert indices is not None, "provide the indices"
                     weights = np.zeros(len(self.gene_dataset))
                     labels = self.gene_dataset.labels[indices].ravel()
                     weights_ = np.zeros(labels.shape)
@@ -111,9 +112,10 @@ class DataLoaders:
                         #weights_[labels == l] = np.maximum((1 / c) * np.sqrt(np.log(1 + (c / scale) ** 2))
                         weights_[labels == l] = min(1/c, 1/50)
                     weights[indices] = weights_
+                    num_samples=len(indices)# has been transformed from bool to int array
                 else:
-                    weights = weighted
-                sampler = WeightedRandomSampler(weights, num_samples=len(indices))
+                    num_samples = np.sum(weights!=0)
+                sampler = WeightedRandomSampler(weights, num_samples=num_samples)
         return DataLoaderWrapper(self.gene_dataset, use_cuda=self.use_cuda, sampler=sampler,
                                  **self.kwargs)
 
