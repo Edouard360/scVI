@@ -20,7 +20,8 @@ def unsupervised_clustering_accuracy(y, y_pred):
     mapping = dict(zip(u, range(n_clusters)))
     reward_matrix = np.zeros((n_clusters, n_clusters), dtype=np.int64)
     for y_pred_, y_ in zip(y_pred, y):
-        reward_matrix[mapping[y_pred_], mapping[y_]] += 1
+        if y_ in mapping:
+            reward_matrix[mapping[y_pred_], mapping[y_]] += 1
     cost_matrix = reward_matrix.max() - reward_matrix
     ind = linear_assignment(cost_matrix)
     return sum([reward_matrix[i, j] for i, j in ind]) * 1.0 / y_pred.size, ind
