@@ -57,11 +57,14 @@ gene_dataset = GeneExpressionDataset.concat_datasets(UMI,nonUMI)
 for i in [0,1]:
     svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
                   gene_dataset.n_labels, n_layers=2)
-    infer = SemiSupervisedVariationalInference(svaec, gene_dataset)
+    infer = SemiSupervisedVariationalInference(svaec, gene_dataset, verbose=True, classification_ratio=1,
+                                               n_epochs_classifier=1,lr_classification=5*10e-3, frequency=10)
     data_loaders = SemiSupervisedDataLoaders(gene_dataset)
     data_loaders['labelled'] = data_loaders(indices=(gene_dataset.batch_indices==i).ravel())
     data_loaders['unlabelled'] = data_loaders(indices=(gene_dataset.batch_indices==(1-i)).ravel())
+    infer.metrics_to_monitor = ['ll', 'accuracy', 'entropy_batch_mixing']
     infer.data_loaders = data_loaders
+    infer.classifier_inference.data_loaders['train'] = data_loaders['labelled']
     infer.train(n_epochs=100)
     if i==0:
         print("Score UMI->nonUMI:",infer.accuracy('unlabelled'))
