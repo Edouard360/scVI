@@ -1,25 +1,21 @@
 import numpy as np
 from scvi.dataset import GeneExpressionDataset
-from scvi.utils import *
 from scvi.metrics.clustering import get_latent, entropy_batch_mixing
-from scvi.utils import to_cuda
 
 from scipy import sparse
 from copy import deepcopy
 
-
 def sample_by_batch(batch_indices, nsamples):
     nbatches = len(np.unique(batch_indices))
     if isinstance(nsamples,int):
-        nsamples = np.repeat(nsamples,nbatches)
+        nsamples = np.repeat(nsamples, nbatches)
     sample = []
-    for i in range(nbatches):
+    for i in np.unique(batch_indices):
         idx = np.arange(len(batch_indices))[batch_indices == i]
         s = np.random.permutation(idx)[:min(len(idx), nsamples[i])]
         sample.append(s)
     sample = np.concatenate(sample)
-    return (sample)
-
+    return sample
 
 def harmonization_stat(model, data_loader,keys, pop1, pop2):
     latent, batch_indices, labels = get_latent(model, data_loader)
@@ -37,8 +33,6 @@ def harmonization_stat(model, data_loader,keys, pop1, pop2):
     return(batch_entropy,res)
 
 
-@no_grad()
-@eval_modules()
 def ind_log_likelihood(vae, data_loader):
     # Iterate once over the data_loader and computes the total log_likelihood
     log_lkl = []
@@ -135,7 +129,7 @@ def knn_purity_avg(latent, label, keys, n_sample=1000,acc=False):
                 score.append(0)
     score = np.asarray(score)
     res = [np.mean(np.asarray(score)[label == i]) for i in np.unique(label)]
-    res = [[keys[i], res[i], np.sum(label==i)] for i in np.unique(label)]
+    res = [[keys[i], res[i], np.sum(label == k)] for i,k in enumerate(np.unique(label))]
     return res
 
 

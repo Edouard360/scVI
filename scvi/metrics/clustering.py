@@ -26,7 +26,6 @@ def unsupervised_clustering_accuracy(y, y_pred):
     ind = linear_assignment(cost_matrix)
     return sum([reward_matrix[i, j] for i, j in ind]) * 1.0 / y_pred.size, ind
 
-
 def clustering_scores(latent, labels, prediction_algorithm='knn', n_labels=None):
     if n_labels is not None:
         n_labels = len(np.unique(labels))

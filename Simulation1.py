@@ -2,7 +2,7 @@ from scvi.harmonization import SCMAP
 
 use_cuda = True
 from rpy2.robjects.conversion import ri2py, py2ri
-import rpy2.robjects as ro
+import rpy2.robjects.numpy2ri as numpy2ri
 
 import numpy as np
 from scipy.sparse import csr_matrix
@@ -23,24 +23,25 @@ import seaborn as sns
 
 from scvi.harmonization import SEURAT, COMBAT
 from scvi.harmonization.benchmark import knn_purity_avg
-from scvi.metrics.clustering import select_indices_evenly,entropy_batch_mixing
+from scvi.metrics.clustering import select_indices_evenly,entropy_batch_mixing,clustering_scores
 from scvi.dataset.data_loaders import SemiSupervisedDataLoaders
 
 
 import sys
 model_type = str(sys.argv[1])
-plotname = 'simulation.UMI_nonUMI'
+plotname = 'simulation.linear'
 
-# countUMI = np.load('../sim_data/count1.npy')
-# countnonUMI = np.load('../sim_data/count2.npy')
-# labelUMI = np.load('../sim_data/label1.npy')
-# labelnonUMI = np.load('../sim_data/label2.npy')
+countUMI = np.load('../sim_data/count1.npy')
+countnonUMI = np.load('../sim_data/count2.npy')
+labelUMI = np.load('../sim_data/label1.npy')
+labelnonUMI = np.load('../sim_data/label2.npy')
 
-
-countUMI = np.load('../sim_data/count.UMI.npy').T
-countnonUMI = np.load('../sim_data/count.nonUMI.npy').T
-labelUMI = np.load('../sim_data/label.UMI.npy').astype(np.int)
-labelnonUMI = np.load('../sim_data/label.nonUMI.npy').astype(np.int)
+# model_type = str(sys.argv[1])
+# plotname = 'simulation.uminonumi'
+# countUMI = np.load('../sim_data/count.UMI.npy').T
+# countnonUMI = np.load('../sim_data/count.nonUMI.npy').T
+# labelUMI = np.load('../sim_data/label.UMI.npy').astype(np.int)
+# labelnonUMI = np.load('../sim_data/label.nonUMI.npy').astype(np.int)
 
 UMI = GeneExpressionDataset(
             *GeneExpressionDataset.get_attributes_from_matrix(
@@ -52,6 +53,21 @@ nonUMI = GeneExpressionDataset(
                 csr_matrix(countnonUMI), labels=labelnonUMI),
             gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
 
+
+# countUMI = np.load('../sim_data/count.UMI.npy')
+# countnonUMI = np.load('../sim_data/count.nonUMI.npy')
+# labelUMI = np.load('../sim_data/label.UMI.npy')
+# labelnonUMI = np.load('../sim_data/label.nonUMI.npy')
+#
+# UMI = GeneExpressionDataset(
+#             *GeneExpressionDataset.get_attributes_from_matrix(
+#                 csr_matrix(countUMI.T), labels=labelUMI),
+#             gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
+#
+# nonUMI = GeneExpressionDataset(
+#             *GeneExpressionDataset.get_attributes_from_matrix(
+#                 csr_matrix(countnonUMI.T), labels=labelnonUMI),
+#             gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
 gene_dataset = GeneExpressionDataset.concat_datasets(UMI,nonUMI)
 
 for i in [0,1]:
@@ -83,8 +99,9 @@ if model_type == 'vae':
     keys = gene_dataset.cell_types
 elif model_type == 'svaec':
     svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
-                  gene_dataset.n_labels,use_labels_groups=False,n_latent=10,n_layers=2)
-    infer = JointSemiSupervisedVariationalInference(svaec, gene_dataset, n_labelled_samples_per_class=20)
+                  gene_dataset.n_labels,use_labels_groups=False,
+                  n_latent=10,n_layers=2)
+    infer = SemiSupervisedVariationalInference(svaec, gene_dataset)
     infer.train(n_epochs=50)
     infer.accuracy('unlabelled')
     data_loader = infer.data_loaders['unlabelled']
@@ -94,15 +111,10 @@ elif model_type == 'svaec':
     keys = gene_dataset.cell_types
 elif model_type == 'Seurat':
     SEURAT = SEURAT()
-    seurat1 = SEURAT.create_seurat(UMI, 0)
-    seurat2 = SEURAT.create_seurat(nonUMI, 1)
-    latent, batch_indices,labels = SEURAT.combine_seurat(seurat1, seurat2)
-    numpy2ri.activate()
-    latent  = ri2py(latent)
-    batch_indices  = ri2py(batch_indices)
-    labels  = ri2py(labels)
-    keys,labels = np.unique(labels,return_inverse=True)
-    numpy2ri.deactivate()
+    #The batch id number HAS to be 1 and 2
+    seurat1 = SEURAT.create_seurat(UMI, 1)
+    seurat2 = SEURAT.create_seurat(nonUMI, 2)
+    latent, batch_indices,labels,keys = SEURAT.get_cca()
 elif model_type == 'Combat':
     COMBAT = COMBAT()
 # corrected = COMBAT.combat_correct(gene_dataset)
@@ -116,9 +128,6 @@ elif model_type == 'Combat':
 sample = select_indices_evenly(2000,batch_indices)
 batch_entropy = entropy_batch_mixing(latent[sample, :], batch_indices[sample])
 print("Entropy batch mixing :", batch_entropy)
-
-if model_type == 'svaec':
-    svaec_acc = compute_accuracy(svaec, data_loader, classifier=svaec.classifier)
 
 
 sample = select_indices_evenly(1000,labels)
@@ -134,27 +143,10 @@ for x in res:
 knn_acc = np.mean([x[1] for x in res])
 print("average KNN accuracy:", knn_acc)
 
-sample = select_indices_evenly(1000,labels)
-latent_s = latent[sample, :]
-batch_s = batch_indices[sample]
-label_s = labels[sample]
-if latent_s.shape[1] != 2:
-    latent_s = TSNE().fit_transform(latent_s)
+res = clustering_scores(np.asarray(latent)[sample,:],labels[sample],'knn',len(np.unique(labels[sample])))
+for x in res:
+    print(x,res[x])
 
-colors = sns.color_palette('tab10',5)
-fig, ax = plt.subplots(figsize=(10, 10))
-for i, k in enumerate(keys):
-    ax.scatter(latent_s[label_s == i, 0], latent_s[label_s == i, 1], c=colors[i], label=k, edgecolors='none')
-
-ax.legend()
-fig.tight_layout()
-fig.savefig('../' + plotname + '.' + model_type + '.label.png', dpi=fig.dpi)
-
-plt.figure(figsize=(10, 10))
-plt.scatter(latent_s[:, 0], latent_s[:, 1], c=batch_s, edgecolors='none')
-plt.axis("off")
-plt.tight_layout()
-plt.savefig('../' + plotname + '.' + model_type + '.batch.png')
 
 # Make sure countUMI = countUMI.T and labelUMI =labelUMI.astype(np.int) // same for countnonUMI...
 print("Starting scmap")

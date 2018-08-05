@@ -20,8 +20,8 @@ from scvi.metrics.log_likelihood import compute_log_likelihood
 from scvi.metrics.visualization import color_dictionary
 from . import Inference, ClassifierInference
 
-plt.switch_backend('agg')
 import seaborn as sns
+plt.switch_backend('agg')
 
 colors_20 = sns.color_palette('tab20', 20)
 
@@ -258,7 +258,7 @@ class SemiSupervisedVariationalInference(VariationalInference):
 
     def loss(self, tensors_all, tensors_labelled):
         loss = super(SemiSupervisedVariationalInference, self).loss(tensors_all)
-        self.model.eval() # We just want to avoid batch norm but remove dropout as well -> to be improved
+        self.model.eval()  # We just want to avoid batch norm but remove dropout as well -> to be improved
         sample_batch, _, _, _, y = tensors_labelled
         classification_loss = F.cross_entropy(self.model.classify(sample_batch), y.view(-1))
         loss += classification_loss * self.classification_ratio
@@ -379,9 +379,3 @@ class JointSemiSupervisedVariationalInference(SemiSupervisedVariationalInference
     def __init__(self, *args, **kwargs):
         kwargs['n_epochs_classifier'] = 0
         super(JointSemiSupervisedVariationalInference, self).__init__(*args, **kwargs)
-
-
-class BatchVariationalInference(VariationalInference):
-    def loss(self, tensors_1, tensors_2):
-        return super(BatchVariationalInference, self).loss([torch.cat((t_1, t_2)) for t_1, t_2 in zip(tensors_1,tensors_2)])
-
