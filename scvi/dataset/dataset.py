@@ -182,6 +182,8 @@ class GeneExpressionDataset(Dataset):
         file_attrs = dict()
         if hasattr(self, "gene_names"):
             row_attrs["Gene"] = self.gene_names
+        if hasattr(self, "gene_symbols"):
+            row_attrs["gene_symbols"] = self.gene_symbols
         if hasattr(self, "cell_types"):
             file_attrs["CellTypes"] = self.cell_types
         loompy.create("data/" + filename, self.X.T, row_attrs, col_attrs, file_attrs=file_attrs)
@@ -341,7 +343,7 @@ class GeneExpressionDataset(Dataset):
         batch_count = np.zeros((self.n_batches, self.n_labels))
         for j in range(self.n_labels):
             for i, c in zip(*np.unique((self.labels[(self.batch_indices == j).ravel()]), return_counts=True)):
-                batch_count[j, i] = c
+                batch_count[int(j), int(i)] = c
         return batch_count.astype(np.int).__str__()
 
 

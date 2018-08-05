@@ -7,14 +7,14 @@ import torch.nn.functional as F
 from torch.distributions import Normal, kl_divergence as kl
 
 from scvi.metrics.log_likelihood import log_zinb_positive, log_nb_positive
-from scvi.models.modules import Encoder, DecoderSCVI
+from scvi.models.modules import Encoder, DecoderSCVI, Module
 from scvi.models.utils import one_hot
 
 torch.backends.cudnn.benchmark = True
 
 
 # VAE model
-class VAE(nn.Module):
+class VAE(Module):
     r"""Variational auto-encoder model.
 
     Args:
@@ -32,12 +32,12 @@ class VAE(nn.Module):
     Examples:
         >>> gene_dataset = CortexDataset()
         >>> vae = VAE(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches * False,
-        ... n_labels=gene_dataset.n_labels, use_cuda=True )
+        ... n_labels=gene_dataset.n_labels, use_cuda=True)
 
     """
 
     def __init__(self, n_input, n_batch=0, n_labels=0, n_hidden=128, n_latent=10, n_layers=1, dropout_rate=0.1,
-                 dispersion="gene", log_variational=True, reconstruction_loss="zinb"):
+                 dispersion="gene", log_variational=True, reconstruction_loss="zinb",decoder_scvi_parameters=dict()):
         super(VAE, self).__init__()
         self.dispersion = dispersion
         self.n_latent = n_latent
@@ -60,8 +60,9 @@ class VAE(nn.Module):
         self.z_encoder = Encoder(n_input, n_latent, n_layers=n_layers, n_hidden=n_hidden,
                                  dropout_rate=dropout_rate)
         self.l_encoder = Encoder(n_input, 1, n_layers=1, n_hidden=n_hidden, dropout_rate=dropout_rate)
-        self.decoder = DecoderSCVI(n_latent, n_input, n_cat_list=[n_batch], n_layers=n_layers, n_hidden=n_hidden,
-                                   dropout_rate=dropout_rate)
+        dec_parameters = {"n_layers": n_layers, "n_hidden": n_hidden, "dropout_rate": dropout_rate}
+        dec_parameters.update(decoder_scvi_parameters)
+        self.decoder = DecoderSCVI(n_latent, n_input, n_cat_list=[n_batch],  **dec_parameters)
 
     def get_latents(self, x, y=None):
         return [self.sample_from_posterior_z(x, y)]

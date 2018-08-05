@@ -16,11 +16,14 @@ from scvi.metrics.clustering import clustering_scores
 from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap, select_indices_evenly
 from scvi.metrics.differential_expression import de_stats, de_cortex
 from scvi.metrics.imputation import imputation, plot_imputation
-from scvi.metrics.log_likelihood import compute_log_likelihood, compute_marginal_log_likelihood
+from scvi.metrics.log_likelihood import compute_log_likelihood
+from scvi.metrics.visualization import color_dictionary
 from . import Inference, ClassifierInference
 
 plt.switch_backend('agg')
+import seaborn as sns
 
+colors_20 = sns.color_palette('tab20', 20)
 
 # Here only what we want to monitor or the essential tasks.
 class VariationalInference(Inference):
@@ -43,9 +46,9 @@ class VariationalInference(Inference):
     """
     default_metrics_to_monitor = ['ll']
 
-    def __init__(self, model, gene_dataset, train_size=0.8, **kwargs):
+    def __init__(self, model, gene_dataset, train_size=0.8, kl=None, **kwargs):
         super(VariationalInference, self).__init__(model, gene_dataset, **kwargs)
-        self.kl = None
+        self.kl = kl
         self.data_loaders = TrainTestDataLoaders(self.gene_dataset, train_size=train_size, use_cuda=self.use_cuda)
 
     def loss(self, tensors):
@@ -133,17 +136,18 @@ class VariationalInference(Inference):
 
     def entropy_batch_mixing(self, name, verbose=False, **kwargs):
         if self.gene_dataset.n_batches >= 2:
-            print("ignoring %s, doing on sequential" % name)
-            name = 'sequential'
-            latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])
-            be_score = entropy_batch_mixing(latent, batch_indices, **kwargs)
-            if verbose:
-                print("Entropy batch mixing %s is : %.4f" % (name, be_score))
-            return be_score
+            if len(self.data_loaders.to_monitor)>0 and name == self.data_loaders.to_monitor[0] or name=='sequential':
+                # only once
+                name = 'sequential'
+                latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])
+                be_score = entropy_batch_mixing(latent, batch_indices, **kwargs)
+                if verbose:
+                    print("Entropy batch mixing %s is : %.4f" % (name, be_score))
+                return be_score
 
     entropy_batch_mixing.mode = 'max'
 
-    def show_t_sne(self, name, n_samples=1000, color_by='', save_name='', uniform=False):
+    def show_t_sne(self, name, n_samples=1000, color_by='batches and labels', save_name='', uniform=False):
         latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])
         if uniform:
             idx_t_sne = np.random.permutation(len(latent))[:n_samples] if n_samples else np.arange(len(latent))
@@ -182,7 +186,11 @@ class VariationalInference(Inference):
                 else:
                     plt_labels = [str(i) for i in range(len(np.unique(indices)))]
                 for i, cell_type in zip(range(self.gene_dataset.n_labels), plt_labels):
-                    axes[1].scatter(latent[indices == i, 0], latent[indices == i, 1], label=cell_type)
+                    if cell_type in color_dictionary:
+                        c = color_dictionary[cell_type]
+                    else:
+                        c = colors_20[i]
+                    axes[1].scatter(latent[indices == i, 0], latent[indices == i, 1], label=cell_type, c=c)
                 axes[1].set_title("label coloring")
                 axes[1].axis("off")
                 axes[1].legend()
@@ -250,14 +258,21 @@ class SemiSupervisedVariationalInference(VariationalInference):
 
     def loss(self, tensors_all, tensors_labelled):
         loss = super(SemiSupervisedVariationalInference, self).loss(tensors_all)
+        self.model.eval() # We just want to avoid batch norm but remove dropout as well -> to be improved
         sample_batch, _, _, _, y = tensors_labelled
         classification_loss = F.cross_entropy(self.model.classify(sample_batch), y.view(-1))
         loss += classification_loss * self.classification_ratio
+        self.model.train_wo_batch_norm(batch_norm=True)
         return loss
 
-    def on_epoch_end(self):
-        self.classifier_inference.train(self.n_epochs_classifier, lr=self.lr_classification)
-        return super(SemiSupervisedVariationalInference, self).on_epoch_end()
+    def on_epoch_begin(self):
+        super(SemiSupervisedVariationalInference, self).on_epoch_begin()
+
+    def on_epoch_end(self, batch_norm=True):
+        self.model.eval()
+        self.classifier_inference.train(self.n_epochs_classifier, lr=self.lr_classification, batch_norm=False)
+        self.model.train_wo_batch_norm(batch_norm=True)
+        return super(SemiSupervisedVariationalInference, self).on_epoch_end(batch_norm=True)
 
     def accuracy(self, name, verbose=False):
         acc = compute_accuracy(self.model, self.data_loaders[name])
@@ -282,7 +297,7 @@ class SemiSupervisedVariationalInference(VariationalInference):
 
     accuracy.mode = 'max'
 
-    def benchmark_accuracy(self, name, last_n_values=10, verbose=False):
+    def benchmark_accuracy(self, name, last_n_values=5, verbose=False):
         values = self.history['accuracy_' + name][-last_n_values:]
         mean = np.mean(values)
         std = 2 * np.sqrt(np.var(values)) / np.sqrt(last_n_values)
@@ -364,3 +379,9 @@ class JointSemiSupervisedVariationalInference(SemiSupervisedVariationalInference
     def __init__(self, *args, **kwargs):
         kwargs['n_epochs_classifier'] = 0
         super(JointSemiSupervisedVariationalInference, self).__init__(*args, **kwargs)
+
+
+class BatchVariationalInference(VariationalInference):
+    def loss(self, tensors_1, tensors_2):
+        return super(BatchVariationalInference, self).loss([torch.cat((t_1, t_2)) for t_1, t_2 in zip(tensors_1,tensors_2)])
+

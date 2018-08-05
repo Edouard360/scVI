@@ -32,13 +32,13 @@ def compute_predictions(vae, data_loader, classifier=None):
         sample_batch, _, _, _, labels = tensors
         all_y += [labels.view(-1)]
 
-        if hasattr(vae, 'classify'):
-            y_pred = vae.classify(sample_batch).argmax(dim=-1)
-        elif classifier is not None:
+        if classifier is not None:
             # Then we use the specified classifier
             if vae is not None:
                 sample_batch, _, _ = vae.z_encoder(torch.log(1+sample_batch))
             y_pred = classifier(sample_batch).argmax(dim=-1)
+        elif hasattr(vae, 'classify'):
+            y_pred = vae.classify(sample_batch).argmax(dim=-1)
         all_y_pred += [y_pred]
 
     all_y_pred = np.array(torch.cat(all_y_pred))

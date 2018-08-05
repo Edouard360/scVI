@@ -38,10 +38,12 @@ class SVAEC(VAE):
 
     def __init__(self, n_input, n_batch, n_labels, n_hidden=128, n_latent=10, n_layers=1, dropout_rate=0.1,
                  y_prior=None, logreg_classifier=False, dispersion="gene", log_variational=True,
-                 reconstruction_loss="zinb", labels_groups=None, use_labels_groups=False):
+                 reconstruction_loss="zinb", labels_groups=None, use_labels_groups=False, classifier_parameters=dict(),
+                 decoder_scvi_parameters=dict()):
         super(SVAEC, self).__init__(n_input, n_hidden=n_hidden, n_latent=n_latent, n_layers=n_layers,
                                     dropout_rate=dropout_rate, n_batch=n_batch, dispersion=dispersion,
-                                    log_variational=log_variational, reconstruction_loss=reconstruction_loss)
+                                    log_variational=log_variational, reconstruction_loss=reconstruction_loss,
+                                    decoder_scvi_parameters=decoder_scvi_parameters)
 
         self.n_labels = n_labels
         self.n_latent_layers = 2
@@ -49,7 +51,9 @@ class SVAEC(VAE):
         if logreg_classifier:
             self.classifier = LinearLogRegClassifier(n_latent, self.n_labels)
         else:
-            self.classifier = Classifier(n_latent, n_hidden, self.n_labels, n_layers, dropout_rate)
+            cls_parameters = {"n_layers":n_layers, "n_hidden":n_hidden, "dropout_rate":dropout_rate}
+            cls_parameters.update(classifier_parameters)
+            self.classifier = Classifier(n_latent,n_labels=self.n_labels, **cls_parameters)
 
         self.encoder_z2_z1 = Encoder(n_latent, n_latent, n_cat_list=[self.n_labels], n_layers=n_layers,
                                      n_hidden=n_hidden, dropout_rate=dropout_rate)
