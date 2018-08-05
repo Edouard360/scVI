@@ -27,13 +27,17 @@ def convert_labels_levels(r_indices, levels):
 
 class SCMAP():
     # An algorithm for annotation
-    def __init__(self, n_features=100, threshold=0):
-        # self.n_clusters = n_clusters
+    def __init__(self):
         warnings.filterwarnings("ignore", category=RRuntimeWarning)
         rpy2.robjects.numpy2ri.activate()
         ro.r["library"]("scmap")
         ro.r["library"]("SingleCellExperiment")
         ro.r["library"]("matrixStats")
+
+        self.n_features=100
+        self.threshold =0
+
+    def set_parameters(self,n_features=100, threshold=0):
         self.n_features = n_features
         self.threshold = threshold
 
@@ -227,3 +231,37 @@ class SCMAP():
     @staticmethod
     def load_rds_file(name, filename):
         ro.r("%s <- readRDS('%s')" % (name, filename))
+
+
+''' The script to run to generate the loom files.
+
+dataset_xin = scmap.create_dataset("../scmap/xin/xin.rds")
+
+dataset_xin.export_loom('xin.loom')
+cell_types_xin = list(filter(lambda p: ".contaminated" not in p, dataset_xin.cell_types))
+dataset_xin.filter_cell_types(cell_types_xin)
+
+dataset_segerstolpe = scmap.create_dataset("../scmap/segerstolpe/segerstolpe.rds")
+
+dataset_segerstolpe.export_loom('segerstolpe.loom')
+# cell_types_segerstolpe = list(filter(lambda p: p != "not applicable", dataset_segerstolpe.cell_types))
+# dataset_segerstolpe.filter_cell_types(cell_types_segerstolpe)
+
+dataset_muraro = scmap.create_dataset("../scmap/muraro/muraro.rds")
+dataset_muraro.export_loom('muraro.loom')
+dataset_baron = scmap.create_dataset("../scmap/baron-human/baron-human.rds")
+dataset_baron.export_loom('baron.loom')
+
+
+dataset_shekhar = scmap.create_dataset("../scmap/shekhar/shekhar.rds")
+dataset_shekhar.export_loom('shekhar.loom')
+
+dataset_macosko = scmap.create_dataset("../scmap/macosko/macosko.rds")
+dataset_macosko.export_loom('macosko.loom')
+
+dataset = GeneExpressionDataset.concat_datasets(dataset_xin, dataset_segerstolpe, dataset_muraro, dataset_baron,
+                                                on='gene_symbols')
+dataset.export_pickle("../scmap/d4-all.pickle") # This is for experiments with the 4 datasets
+dataset.subsample_genes(subset_genes=(dataset.X.max(axis=0) <= 2500).ravel())
+dataset.subsample_genes(1500)
+'''
