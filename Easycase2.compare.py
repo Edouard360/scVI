@@ -55,14 +55,10 @@ elif model_type == 'svaec':
     keys = gene_dataset.cell_types
     batch_indices = np.concatenate(batch_indices)
 elif model_type == 'Seurat':
-    # SEURAT = SEURAT()
-    # seurat1 = SEURAT.create_seurat(dataset1, 1)
-    # seurat2 = SEURAT.create_seurat(dataset2, 2)
-    # latent, batch_indices,labels,keys = SEURAT.get_cca()
-    latent = np.genfromtxt('../macosko_regev.CCA.txt')
-    label = np.genfromtxt('../macosko_regev.CCA.label.txt',dtype='str')
+    latent = np.genfromtxt('../macosko.CCA.txt')
+    labels = np.genfromtxt('../macosko.CCA.label.txt').astype('int')
     keys = gene_dataset.cell_types
-    batch_indices = np.genfromtxt('../macosko_regev.CCA.batch.txt')
+    batch_indices = np.genfromtxt('../macosko.CCA.batch.txt')
 elif model_type == 'Combat':
     COMBAT = COMBAT()
     latent = COMBAT.combat_pca(gene_dataset)
@@ -93,3 +89,34 @@ for x in res:
     print(x,res[x])
 
 infer.show_t_sne(color_by="batches and labels")
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.manifold import TSNE
+
+colors = sns.color_palette('tab20')
+sample = select_indices_evenly(1000,labels)
+latent_s = latent[sample, :]
+batch_s = batch_indices[sample]
+label_s = labels[sample]
+if latent_s.shape[1] != 2:
+    latent_s = TSNE().fit_transform(latent_s)
+
+plt.figure(figsize=(10, 10))
+plt.scatter(latent_s[:, 0], latent_s[:, 1], c=batch_s, edgecolors='none')
+plt.axis("off")
+plt.tight_layout()
+plt.savefig('../easy2.Seurat.batch.png')
+
+groups = ['Pvalb', 'L2/3', 'Sst', 'L5 PT', 'L5 IT Tcap', 'L5 IT Aldh1a7', 'L5 IT Foxp2', 'L5 NP',
+                      'L6 IT', 'L6 CT', 'L6 NP', 'L6b', 'Lamp5', 'Vip', 'Astro', 'OPC', 'VLMC', 'Oligo', 'Sncg', 'Endo',
+                      'SMC', 'MICRO']
+
+fig, ax = plt.subplots(figsize=(20, 20))
+for k in range(len(np.unique(label_s))):
+    ax.scatter(latent_s[label_s == k, 0], latent_s[label_s == k, 1], c=colors[k],label=groups[k], edgecolors='none')
+
+ax.legend()
+fig.tight_layout()
+fig.savefig('../easy2.Seurat.label.png', dpi=fig.dpi)
+

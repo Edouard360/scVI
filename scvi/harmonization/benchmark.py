@@ -17,9 +17,7 @@ def sample_by_batch(batch_indices, nsamples):
     sample = np.concatenate(sample)
     return sample
 
-def harmonization_stat(model, data_loader,keys, pop1, pop2):
-    latent, batch_indices, labels = get_latent(model, data_loader)
-    batch_indices = np.concatenate(batch_indices)
+def harmonization_stat(latent, batch_indices,labels,keys):
     sample = sample_by_batch(batch_indices, 2000)
     sample_2batch = sample[(batch_indices[sample] == pop1) + (batch_indices[sample] == pop2)]
     batch_entropy = entropy_batch_mixing(latent[sample_2batch, :], batch_indices[sample_2batch])

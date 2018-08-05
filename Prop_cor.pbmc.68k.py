@@ -18,7 +18,8 @@ import sys
 
 low = float(sys.argv[1])
 high = float(sys.argv[2])
-
+option = str(sys.argv[3])
+method = str(sys.argv[4])
 count, geneid, cellid = get_matrix_from_dir('pbmc8k')
 geneid = geneid[:, 1]
 count = count.T.tocsr()
@@ -37,12 +38,15 @@ labels_map = [0, 0, 1, 2, 3, 4, 5, 6]
 cell_type = ["CD4+ T Helper2", "CD56+ NK", "CD14+ Monocyte", "CD19+ B", "CD8+ Cytotoxic T", "FCGR3A Monocyte", "na"]
 dataset2 = assign_label(cellid, geneid, labels_map, count, cell_type, seurat)
 gene_dataset: GeneExpressionDataset = GeneExpressionDataset.concat_datasets(dataset1, dataset2)
-gene_dataset.subsample_genes(500)
+gene_dataset.subsample_genes(5000)
 
 rmCellTypes = {'na', 'dendritic'}
 newCellType = [k for i, k in enumerate(gene_dataset.cell_types) if k not in rmCellTypes]
 gene_dataset.filter_cell_types(newCellType)
 
+if option == 'large':
+    from scvi.dataset.dataset10X import Dataset10X
+    dataset3 = Dataset10X('fresh_68k_pbmc_donor_a')
 
 for prob_i in range(50):
     correlation = low - 0.01
@@ -68,11 +72,16 @@ for prob_i in range(50):
     print("correlation between the cell-type composition of the subsampled dataset is %.3f" % correlation)
     sub_dataset = deepcopy(gene_dataset)
     sub_dataset.update_cells(np.concatenate(cells))
-    vae = VAE(sub_dataset.nb_genes, n_batch=sub_dataset.n_batches, n_labels=sub_dataset.n_labels,
-              n_hidden=128, dispersion='gene',n_layers=2)
-    infer = VariationalInference(vae, sub_dataset, use_cuda=use_cuda)
-    infer.train(n_epochs=250)
-    latent, batch_indices, labels = infer.get_latent('sequential')
+    if option == 'small':
+        sub_dataset.subsample_genes(1000)
+    elif option =='large':
+        sub_dataset = GeneExpressionDataset.concat_datasets(sub_dataset, dataset3)
+    if method == 'vae':
+        vae = VAE(sub_dataset.nb_genes, n_batch=sub_dataset.n_batches, n_labels=sub_dataset.n_labels,
+                  n_hidden=128, dispersion='gene',n_layers=2)
+        infer = VariationalInference(vae, sub_dataset, use_cuda=use_cuda)
+        infer.train(n_epochs=250)
+        latent, batch_indices, labels = infer.get_latent('sequential')
     batch_indices = np.concatenate(batch_indices)
     sample = select_indices_evenly(2000,batch_indices)
     batch_entropy = entropy_batch_mixing(latent[sample, :], batch_indices[sample])

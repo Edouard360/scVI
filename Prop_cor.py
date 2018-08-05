@@ -1,3 +1,5 @@
+from scvi.models import SVAEC
+
 use_cuda = True
 
 from numpy.random import uniform
@@ -6,7 +8,7 @@ from scvi.dataset.dataset import GeneExpressionDataset
 from scvi.dataset.BICCN import MacoskoDataset, RegevDataset
 from copy import deepcopy
 from scvi.models.vae import VAE
-from scvi.inference import VariationalInference
+from scvi.inference import VariationalInference, SemiSupervisedVariationalInference
 from scvi.harmonization.benchmark import sample_by_batch
 from scvi.metrics.clustering import select_indices_evenly, entropy_batch_mixing, clustering_scores
 from scvi.harmonization.benchmark import knn_purity_avg
@@ -16,6 +18,7 @@ import sys
 
 min = float(sys.argv[1])
 max = float(sys.argv[2])
+method = str(sys.argv[3])
 
 dataset1 = MacoskoDataset()
 dataset2 = RegevDataset()
@@ -37,7 +40,7 @@ labels_groups = [[i for i, x in enumerate(groups) if y.startswith(x)][0] for y i
 coarse_labels_dict = dict(zip(np.arange(len(labels_groups)), labels_groups))
 coarse_labels = np.asarray([coarse_labels_dict[x] for x in new_labels])
 gene_dataset.cell_types = np.asarray(groups)[np.unique(coarse_labels)]
-gene_dataset.labels = np.unique(coarse_labels, return_inverse=True)[1].reshape(len(coarse_labels,1))
+gene_dataset.labels = np.unique(coarse_labels, return_inverse=True)[1].reshape(len(coarse_labels),1)
 
 for prob_i in range(50):
     correlation = min - 0.01
@@ -62,11 +65,23 @@ for prob_i in range(50):
     print("correlation between the cell-type composition of the subsampled dataset is %.3f" % correlation)
     sub_dataset = deepcopy(gene_dataset)
     sub_dataset.update_cells(np.concatenate(cells))
-    vae = VAE(sub_dataset.nb_genes, n_batch=sub_dataset.n_batches, n_labels=sub_dataset.n_labels,
-              n_hidden=128, dispersion='gene')
-    infer = VariationalInference(vae, sub_dataset, use_cuda=use_cuda)
-    infer.train(n_epochs=250)
-    latent, batch_indices, labels = infer.get_latent('sequential')
+    if method =='vae':
+        vae = VAE(sub_dataset.nb_genes, n_batch=sub_dataset.n_batches, n_labels=sub_dataset.n_labels,
+                  n_hidden=128, dispersion='gene')
+        infer = VariationalInference(vae, sub_dataset, use_cuda=use_cuda)
+        infer.train(n_epochs=250)
+        latent, batch_indices, labels = infer.get_latent('sequential')
+    elif method == 'svaec':
+        svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
+                      gene_dataset.n_labels, use_labels_groups=False,
+                      n_latent=10, n_layers=2)
+        infer = SemiSupervisedVariationalInference(svaec, gene_dataset)
+        infer.train(n_epochs=50)
+        print('svaec acc =', infer.accuracy('unlabelled'))
+        data_loader = infer.data_loaders['unlabelled']
+        latent, batch_indices, labels = get_latent(infer.model, infer.data_loaders['unlabelled'])
+        keys = gene_dataset.cell_types
+        batch_indices = np.concatenate(batch_indices)
     keys = sub_dataset.cell_types
     batch_entropy = entropy_batch_mixing(latent, batch_indices)
     print("Entropy batch mixing :", batch_entropy)

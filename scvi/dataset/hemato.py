@@ -70,6 +70,3 @@ class MyeloidDataset(GeneExpressionDataset):
         self.download_names = ["GSE72857_umitab.txt.gz","GSE72857_experimental_design.txt.gz	"]
 
 
-#
-# import numpy as np
-# gene_order = np.genfromtxt('Tusi/genes.csv',delimiter='')
