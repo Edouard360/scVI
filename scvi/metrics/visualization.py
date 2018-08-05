@@ -51,3 +51,10 @@ macosko_regev_colors = [c1 for c2 in macosko_regev_colors for c1 in c2]
 macosko_regev_dictionary = dict(zip(macosko_regev_labels_flattened, macosko_regev_colors))
 
 color_dictionary.update(macosko_regev_dictionary)
+
+
+pancreas_dictionary = {
+    'alpha':sns.color_palette("Blues")[0],
+    'beta': sns.color_palette("Greens")[0],
+    'gamma': sns.color_palette("Reds")[0]
+}

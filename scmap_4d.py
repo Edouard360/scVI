@@ -52,6 +52,7 @@ dataset_.filter_cell_types(all_cell_types)
 index = {'xin': 0, 'segerstolpe': 1, 'muraro': 2, 'baron': 3}
 
 
+
 def split_data(original_dataset, sources, target, nb_genes=1500, batch_size=128):
     dataset = copy.deepcopy(original_dataset)
     dataset.update_cells(
