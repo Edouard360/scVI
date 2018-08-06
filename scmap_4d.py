@@ -5,6 +5,7 @@ import copy
 import numpy as np
 
 from scvi.dataset import *
+from scvi.dataset.scmap_datasets import XinDataset, SegerstolpeDataset, MuraroDataset, BaronDataset
 from scvi.harmonization import SCMAP
 from scvi.inference import *
 from scvi.models import *
@@ -34,24 +35,26 @@ experiment_number = 15
 # experiment-15:
 #  lr=1e-2 : batch mixing ? - seems to work on 1 -> 0
 
-filename_svaec = '4d-svaec-results-%i.pickle' % experiment_number
-folder = 'figures_scmap_%i/' % experiment_number
-if not os.path.exists(folder):
-    os.makedirs(folder)
 
-if os.path.exists(filename_svaec):
-    results_svaec = pickle.load(open(filename_svaec, 'rb'))
-else:
-    results_svaec = dict()
 
+# filename_svaec = '4d-svaec-results-%i.pickle' % experiment_number
+# folder = 'figures_scmap_%i/' % experiment_number
+# if not os.path.exists(folder):
+#     os.makedirs(folder)
+#
+# if os.path.exists(filename_svaec):
+#     results_svaec = pickle.load(open(filename_svaec, 'rb'))
+# else:
+#     results_svaec = dict()
+#
 dataset_ = GeneExpressionDataset.load_pickle('../scmap/d4-all.pickle')
-
-all_cell_types = list(
-    filter(lambda p: p not in ["unknown", "unclassified", "unclassified endocrine", "unclear"], dataset_.cell_types))
-dataset_.filter_cell_types(all_cell_types)
+# #
+# all_cell_types = list(
+#     filter(lambda p: p not in ["unknown", "unclassified", "unclassified endocrine", "unclear"], dataset_.cell_types))
+# dataset_.filter_cell_types(all_cell_types)
 index = {'xin': 0, 'segerstolpe': 1, 'muraro': 2, 'baron': 3}
-
-
+# #
+#
 
 def split_data(original_dataset, sources, target, nb_genes=1500, batch_size=128):
     dataset = copy.deepcopy(original_dataset)
@@ -92,10 +95,12 @@ def split_data(original_dataset, sources, target, nb_genes=1500, batch_size=128)
     print("MAX Accuracy = ", np.mean([1 if l in np.unique(labels_train) else 0 for l in labels_test]))
     return dataset, data_loaders, (X_train, labels_train, X_test, labels_test)
 
-
+#
 names = ['xin', 'segerstolpe', 'muraro', 'baron']
-nb_genes = 300
-batch_size = 128
+# nb_genes = 300
+# batch_size = 128
+
+
 
 # for i in range(1,4):#range(3, 0, -1):
 #     for sources in list(itertools.combinations(range(0, 4), i)):
@@ -153,7 +158,8 @@ if os.path.exists(filename_scmap):
 else:
     results_scmap = dict()
 print("DOING SCMAP")
-print(results_scmap)
+#print(results_scmap)
+nb_genes=300
 scmap = SCMAP()
 for n_features in [300]:#, 500]:
     scmap.set_parameters(n_features=n_features)
@@ -180,3 +186,43 @@ for n_features in [300]:#, 500]:
                 pickle.dump(results_scmap, open(filename_scmap, 'wb'))
 
 print(results_scmap[300])
+
+#
+# datasets = [XinDataset(), SegerstolpeDataset(), MuraroDataset(), BaronDataset()]
+# filename_scmap = '4d-scmap-results-2.pickle'
+# if os.path.exists(filename_scmap):
+#     results_scmap = pickle.load(open(filename_scmap, 'rb'))
+# else:
+#     results_scmap = dict()
+# print("DOING SCMAP")
+# #print(results_scmap)
+# scmap = SCMAP()
+# for n_features in [300]:#, 500]:
+#     scmap.set_parameters(n_features=n_features)
+#     if n_features not in results_scmap:
+#         results_scmap[n_features] = dict()
+#     for i in range(1,4):
+#         for sources in list(itertools.combinations(range(0, 4), i)):
+#             targets = list(range(4))
+#             for source in sources:
+#                 targets.remove(source)
+#             if sources not in results_scmap[n_features]:
+#                 results_scmap[n_features][sources] = dict()
+#             for target in targets:
+#                 print("Sources : %s\nTarget : %s" % (' '.join([names[s] for s in sources]), names[target]))
+#                 title = "%s -> %s" % (' '.join([names[s] for s in sources]), names[target])
+#                 dataset = GeneExpressionDataset.concat_datasets(datasets[target], datasets[sources[0]])
+#                 dataset.subsample_genes(n_features)
+#                 data_loaders = SemiSupervisedDataLoaders(dataset)
+#                 data_loaders['unlabelled'] = data_loaders(indices = (dataset.batch_indices==0).ravel().astype(np.bool))
+#                 data_loaders['labelled'] = data_loaders(indices = (dataset.batch_indices==1).ravel().astype(np.bool))
+#                 (X_train, labels_train), = data_loaders.raw_data(data_loaders['labelled'])
+#                 (X_test, labels_test), = data_loaders.raw_data(data_loaders['unlabelled'])
+#                 scmap.fit_scmap_cluster(X_train, labels_train)
+#                 score = scmap.score(X_test, labels_test)
+#                 print("Score: ", score)
+#                 results_scmap[n_features][sources][target] = score
+#
+#                 pickle.dump(results_scmap, open(filename_scmap, 'wb'))
+#
+# print(results_scmap[300])

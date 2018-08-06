@@ -94,7 +94,7 @@ class VariationalInference(Inference):
         plot_imputation(np.concatenate(original_list), np.concatenate(imputed_list), title=title)
         return original_list, imputed_list
 
-    def clustering_scores(self, name, verbose=True, prediction_algorithm='knn'):
+    def clustering_scores(self, name, verbose=False, prediction_algorithm='knn'):
         if self.gene_dataset.n_labels > 1:
             latent, _, labels = get_latent(self.model, self.data_loaders[name])
 
@@ -105,7 +105,7 @@ class VariationalInference(Inference):
                       (name, prediction_algorithm, scores['asw'], scores['nmi'], scores['ari'], scores['uca']))
             return scores
 
-    def nn_overlap_score(self, name='sequential', verbose=True, **kwargs):
+    def nn_overlap_score(self, name='sequential', verbose=False, **kwargs):
         if hasattr(self.gene_dataset, 'adt_expression_clr'):
             assert name == 'sequential'  # only works for the sequential data_loader (mapping indices)
             latent, _, _ = get_latent(self.model, self.data_loaders[name])
@@ -146,7 +146,7 @@ class VariationalInference(Inference):
     entropy_batch_mixing.mode = 'max'
 
     def show_t_sne(self, name, n_samples=1000, color_by='batches and labels', save_name='', latent=None, batch_indices=None,
-                   labels=None, n_batch=None, uniform=True):
+                   labels=None, n_batch=None, uniform=False):
         # If no latent representation is given
         if latent is None:
             latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])
@@ -211,15 +211,15 @@ class VariationalInference(Inference):
             latent = TSNE().fit_transform(latent[idx_t_sne])
         return latent, idx_t_sne
 
-    def nn_latentspace(self, name, verbose=True, **kwargs):
+    def nn_latentspace(self, name, verbose=False, **kwargs):
         data_train, _, labels_train = self.get_latent('labelled')
         data_test, _, labels_test = self.get_latent('unlabelled')
         nn = KNeighborsClassifier()
         nn.fit(data_train, labels_train)
         score = nn.score(data_test, labels_test)
-
-        print("NN classifier score:", score)
-        print("NN classifier tuple:", compute_accuracy_tuple(labels_test, nn.predict(data_test)))
+        if verbose:
+            print("NN classifier score:", score)
+            print("NN classifier tuple:", compute_accuracy_tuple(labels_test, nn.predict(data_test)))
         return score
 
     def svc_latent_space(self, unit_test=False):

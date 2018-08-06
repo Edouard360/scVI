@@ -10,7 +10,7 @@ from scipy.sparse import csr_matrix
 from scvi.dataset.dataset import GeneExpressionDataset
 
 from scvi.models.vae import VAE
-from scvi.models.svaec import SVAEC
+from scvi.models.scanvi import SCANVI
 
 from scvi.inference import *
 
@@ -71,8 +71,8 @@ nonUMI = GeneExpressionDataset(
 gene_dataset = GeneExpressionDataset.concat_datasets(UMI,nonUMI)
 
 for i in [0,1]:
-    svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
-                  gene_dataset.n_labels, n_layers=2)
+    svaec = SCANVI(gene_dataset.nb_genes, gene_dataset.n_batches,
+                   gene_dataset.n_labels, n_layers=2)
     infer = SemiSupervisedVariationalInference(svaec, gene_dataset, verbose=True, classification_ratio=1,
                                                n_epochs_classifier=1,lr_classification=5*10e-3, frequency=10)
     data_loaders = SemiSupervisedDataLoaders(gene_dataset)
@@ -98,9 +98,9 @@ if model_type == 'vae':
     batch_indices = np.concatenate(batch_indices)
     keys = gene_dataset.cell_types
 elif model_type == 'svaec':
-    svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
-                  gene_dataset.n_labels,use_labels_groups=False,
-                  n_latent=10,n_layers=2)
+    svaec = SCANVI(gene_dataset.nb_genes, gene_dataset.n_batches,
+                   gene_dataset.n_labels, use_labels_groups=False,
+                   n_latent=10, n_layers=2)
     infer = SemiSupervisedVariationalInference(svaec, gene_dataset)
     infer.train(n_epochs=50)
     infer.accuracy('unlabelled')

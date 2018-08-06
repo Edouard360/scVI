@@ -6,7 +6,7 @@ from scipy.sparse import csr_matrix
 from scvi.dataset.dataset import GeneExpressionDataset
 
 from scvi.models.vae import VAE
-from scvi.models.svaec import SVAEC
+from scvi.models.scanvi import SCANVI
 
 from scvi.inference.variational_inference import VariationalInference
 from scvi.inference.variational_inference import SemiSupervisedVariationalInference
@@ -50,9 +50,9 @@ if model_type == 'vae':
     batch_indices = np.concatenate(batch_indices)
     keys = gene_dataset.cell_types
 elif model_type == 'svaec':
-    svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
-                  gene_dataset.n_labels, use_labels_groups=False,
-                  n_latent=10, n_layers=2)
+    svaec = SCANVI(gene_dataset.nb_genes, gene_dataset.n_batches,
+                   gene_dataset.n_labels, use_labels_groups=False,
+                   n_latent=10, n_layers=2)
     infer = SemiSupervisedVariationalInference(svaec, gene_dataset)
     infer.train(n_epochs=50)
     infer.accuracy('unlabelled')

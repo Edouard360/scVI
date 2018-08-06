@@ -100,8 +100,8 @@ elif model_type is 'svaec':
         data_loader = DataLoader(gene_dataset, batch_size=128, pin_memory=use_cuda, shuffle=False,
                                  collate_fn=gene_dataset.collate_fn)
     elif model_type is 'svaec':
-        svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
-                      gene_dataset.n_labels,use_labels_groups=True,labels_groups = list(labels_groups))
+        svaec = SCANVI(gene_dataset.nb_genes, gene_dataset.n_batches,
+                       gene_dataset.n_labels, use_labels_groups=True, labels_groups = list(labels_groups))
         # svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
         #               gene_dataset.n_labels,use_labels_groups=False)
         infer = SemiSupervisedVariationalInference(svaec, gene_dataset, n_labelled_samples_per_class=20)
@@ -149,8 +149,8 @@ dataset.subsample_genes(3000)
 labels_groups, n = arrange_categories(np.array(labels_groups))
 
 labels_groups = real_labels_groups
-svaec = SVAEC(dataset.nb_genes, dataset.n_batches, dataset.n_labels,
-              labels_groups=labels_groups, use_labels_groups=True)
+svaec = SCANVI(dataset.nb_genes, dataset.n_batches, dataset.n_labels,
+               labels_groups=labels_groups, use_labels_groups=True)
 
 infer = JointSemiSupervisedVariationalInference(svaec, dataset, frequency=frequency, verbose=False)
 infer.metrics_to_monitor = ['ll', 'hierarchical_accuracy']

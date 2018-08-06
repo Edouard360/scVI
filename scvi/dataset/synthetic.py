@@ -1,6 +1,7 @@
 import numpy as np
-
 from . import GeneExpressionDataset
+from . import LoomDataset
+
 
 
 class SyntheticDataset(GeneExpressionDataset):
@@ -15,32 +16,14 @@ class SyntheticDataset(GeneExpressionDataset):
             gene_names=np.arange(nb_genes).astype(np.str), cell_types=np.arange(n_labels).astype(np.str)
         )
 
+class SyntheticUMI(LoomDataset):
+    def __init__(self, save_path='data/'):
+        super(SyntheticUMI, self).__init__(filename='umi.loom',
+                                           save_path=save_path,
+                                           url='https://github.com/YosefLab/scVI-data/raw/master/umi.loom')
 
-class SyntheticSimilar(GeneExpressionDataset):
-    def __init__(self):
-        cluster_1 = np.load("data/sim_batch/label1.npy").astype(np.int)
-        count_1 = np.load("data/sim_batch/count1.npy")
-        cluster_1 = cluster_1 - 1
-
-        cluster_2 = np.load("data/sim_batch/label2.npy").astype(np.int)
-        count_2 = np.load("data/sim_batch/count2.npy")
-        cluster_2 = cluster_2 - 1
-
-        super(SyntheticSimilar, self).__init__(
-            *GeneExpressionDataset.get_attributes_from_list([count_1, count_2], list_labels=[cluster_1, cluster_2])
-        )
-
-
-class SyntheticDifferent(GeneExpressionDataset):
-    def __init__(self):
-        cluster_1 = np.load("data/sim_batch/label.nonUMI.npy").astype(np.int)
-        count_1 = np.load("data/sim_batch/count.nonUMI.npy")
-        cluster_1 = cluster_1 - 1
-
-        cluster_2 = np.load("data/sim_batch/label.UMI.npy").astype(np.int)
-        count_2 = np.load("data/sim_batch/count.UMI.npy")
-        cluster_2 = cluster_2 - 1
-
-        super(SyntheticDifferent, self).__init__(
-            *GeneExpressionDataset.get_attributes_from_list([count_1, count_2], list_labels=[cluster_1, cluster_2])
-        )
+class SyntheticNONUMI(LoomDataset):
+    def __init__(self, save_path='data/'):
+        super(SyntheticNONUMI, self).__init__(filename='nonumi.loom',
+                                                 save_path=save_path,
+                                                 url='https://github.com/YosefLab/scVI-data/raw/master/nonumi.loom')

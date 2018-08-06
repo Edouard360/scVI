@@ -281,9 +281,9 @@ for i in range(3, 0,-1):
                                                                                              target, nb_genes=nb_genes)  # , nb_genes=1500)
             # svaec_experiment(dataset, data_loaders, results_svaec, title, sources, target)
 
-            svaec = SVAEC(dataset.nb_genes, dataset.n_batches, dataset.n_labels,
-                          n_layers=2, dropout_rate=0.1,decoder_scvi_parameters={'n_layers': 2},
-                          classifier_parameters={'n_layers': 2, 'n_hidden': 256})
+            svaec = SCANVI(dataset.nb_genes, dataset.n_batches, dataset.n_labels,
+                           n_layers=2, dropout_rate=0.1, decoder_scvi_parameters={'n_layers': 2},
+                           classifier_parameters={'n_layers': 2, 'n_hidden': 256})
                           # logreg_classifier=True
                           #decoder_scvi_parameters={'n_layers': 2}, # 2-3
                           #classifier_parameters={'n_layers': 3, 'n_hidden': 512})  # 3-1024 # 2 256

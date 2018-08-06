@@ -139,7 +139,7 @@ for i in range(3, 1, -1): # Just 3 and 2
             pickle.dump(results_vae, open(filename_vae, 'wb'))
 
 
-            svaec = SVAEC(dataset.nb_genes, dataset.n_batches, dataset.n_labels,#dispersion='gene-batch',
+            svaec = SCANVI(dataset.nb_genes, dataset.n_batches, dataset.n_labels,  #dispersion='gene-batch',
                           n_layers=2, n_hidden=256, dropout_rate=0.1)
             svaec.eval()
             infer_svaec = SemiSupervisedVariationalInference(svaec, dataset, frequency=10, verbose=True,
