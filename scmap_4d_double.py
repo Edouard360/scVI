@@ -7,88 +7,102 @@ import numpy as np
 from scvi.dataset import *
 from scvi.dataset.scmap_datasets import XinDataset, SegerstolpeDataset, MuraroDataset, BaronDataset
 from scvi.harmonization import SCMAP
-from scvi.inference import *
-from scvi.models import *
+# from scvi.inference import *
+# from scvi.models import *
+from scvi.dataset.synthetic import SyntheticUMI, SyntheticNONUMI
+
+scmap = SCMAP()
+synthetic_umi = SyntheticUMI()
+synthetic_nonumi = SyntheticNONUMI()
+
+for n_features in [100,300,1000]:
+    scmap.set_parameters(n_features=n_features)
+    scmap.fit_scmap_cluster(synthetic_umi.X, synthetic_nonumi.labels.astype(np.int).ravel())
+    print(scmap.score(synthetic_nonumi.X, synthetic_nonumi.labels.astype(np.int).ravel()))
+
+    scmap.set_parameters(n_features=n_features)
+    scmap.fit_scmap_cluster(synthetic_nonumi.X, synthetic_nonumi.labels.astype(np.int).ravel())
+    print(scmap.score(synthetic_umi.X, synthetic_nonumi.labels.astype(np.int).ravel()))
 
 
 
 
-results_svaec = dict()
-
-index = {'xin': 0, 'segerstolpe': 1, 'muraro': 2, 'baron': 3}
-
-
-def split_data(original_dataset, sources, target, nb_genes=1500, batch_size=128):
-    dataset = copy.deepcopy(original_dataset)
-    # dataset.update_cells(
-    #     (sum([dataset.batch_indices == s for s in sources + (target,)]).astype(np.bool).ravel()))
-    dataset.subsample_genes(nb_genes)
-    # dataset.squeeze()
-    #dataset = original_dataset
-    dataset.X = np.ascontiguousarray(dataset.X, dtype=np.float32)
-    dataset.local_means = np.ascontiguousarray(dataset.local_means, dtype=np.float32)
-    dataset.local_vars = np.ascontiguousarray(dataset.local_vars, dtype=np.float32)
-    dataset.labels = np.ascontiguousarray(dataset.labels, dtype=np.float32)
-    dataset.batch_indices = np.ascontiguousarray(dataset.batch_indices, dtype=np.float32)
-    print("MAKING CONTIGUOUS")
-
-    print(dataset)
-
-    data_loaders = SemiSupervisedDataLoaders(dataset, batch_size=batch_size)  # batch_size=512 ?
-    all_weights = np.ones(len(dataset))
-    indices_source = sum((dataset.batch_indices == source).ravel() for source in sources).astype(np.bool)
-    data_loaders['labelled'] = data_loaders(indices=indices_source)
-    indices_target = (dataset.batch_indices == target).ravel().astype(np.bool)
-    data_loaders['unlabelled'] = data_loaders(indices=indices_target)
-
-    #data_loaders['all'] = data_loaders['labelled'] + data_loaders['unlabelled']
-    for key, v in index.items():
-        data_loaders[key] = data_loaders(indices=(dataset.batch_indices == v).ravel())
-
-    data_loaders.loop = ['all', 'labelled']  #   # _weighted
-
-    (X_train, labels_train), = data_loaders.raw_data(data_loaders['labelled'])
-    (X_test, labels_test), = data_loaders.raw_data(data_loaders['unlabelled'])
-    print("MAX Accuracy = ", np.mean([1 if l in np.unique(labels_train) else 0 for l in labels_test]))
-    return dataset, data_loaders, (X_train, labels_train, X_test, labels_test)
-
+# results_svaec = dict()
 #
-names = ['xin', 'segerstolpe', 'muraro', 'baron']
-nb_genes = 300
-batch_size = 128
-
-# dataset_ = GeneExpressionDataset.load_pickle('../scmap/d4-all.pickle')
-# # #
-# all_cell_types = list(
-#     filter(lambda p: p not in ["unknown", "unclassified", "unclassified endocrine", "unclear"], dataset_.cell_types))
-# dataset_.filter_cell_types(all_cell_types)
-
-sources = (0,)
-target = 1
-print("Sources : %s\nTarget : %s" % (' '.join([names[s] for s in sources]), names[target]))
-
-title = "%s -> %s" % (' '.join([names[s] for s in sources]), names[target])
-
-datasets = [XinDataset(), SegerstolpeDataset()]
-dataset_ = GeneExpressionDataset.concat_datasets(*datasets)
-
-dataset, data_loaders, (X_train, labels_train, X_test, labels_test) = split_data(dataset_, sources,
-                                                                                 target,
-                                                                                 nb_genes=nb_genes,
-                                                                                 batch_size=batch_size)
-
-
-#dataset.filter_cell_types()
-vae = VAE(dataset.nb_genes, dataset.n_batches, dataset.n_labels,
-          n_layers=2, n_hidden=256, dropout_rate=0.1)
-# 0.2 in dropout since we move it ?
-infer = VariationalInference(vae, dataset, verbose=True, frequency=50)
-infer.metrics_to_monitor+=['nn_latentspace']
-
-infer.data_loaders = data_loaders
-infer.data_loaders.loop = ['all']
-infer.data_loaders['train'] = data_loaders['all']
-infer.train(300, lr=1e-3)
+# index = {'xin': 0, 'segerstolpe': 1, 'muraro': 2, 'baron': 3}
+#
+#
+# def split_data(original_dataset, sources, target, nb_genes=1500, batch_size=128):
+#     dataset = copy.deepcopy(original_dataset)
+#     # dataset.update_cells(
+#     #     (sum([dataset.batch_indices == s for s in sources + (target,)]).astype(np.bool).ravel()))
+#     dataset.subsample_genes(nb_genes)
+#     # dataset.squeeze()
+#     #dataset = original_dataset
+#     dataset.X = np.ascontiguousarray(dataset.X, dtype=np.float32)
+#     dataset.local_means = np.ascontiguousarray(dataset.local_means, dtype=np.float32)
+#     dataset.local_vars = np.ascontiguousarray(dataset.local_vars, dtype=np.float32)
+#     dataset.labels = np.ascontiguousarray(dataset.labels, dtype=np.float32)
+#     dataset.batch_indices = np.ascontiguousarray(dataset.batch_indices, dtype=np.float32)
+#     print("MAKING CONTIGUOUS")
+#
+#     print(dataset)
+#
+#     data_loaders = SemiSupervisedDataLoaders(dataset, batch_size=batch_size)  # batch_size=512 ?
+#     all_weights = np.ones(len(dataset))
+#     indices_source = sum((dataset.batch_indices == source).ravel() for source in sources).astype(np.bool)
+#     data_loaders['labelled'] = data_loaders(indices=indices_source)
+#     indices_target = (dataset.batch_indices == target).ravel().astype(np.bool)
+#     data_loaders['unlabelled'] = data_loaders(indices=indices_target)
+#
+#     #data_loaders['all'] = data_loaders['labelled'] + data_loaders['unlabelled']
+#     for key, v in index.items():
+#         data_loaders[key] = data_loaders(indices=(dataset.batch_indices == v).ravel())
+#
+#     data_loaders.loop = ['all', 'labelled']  #   # _weighted
+#
+#     (X_train, labels_train), = data_loaders.raw_data(data_loaders['labelled'])
+#     (X_test, labels_test), = data_loaders.raw_data(data_loaders['unlabelled'])
+#     print("MAX Accuracy = ", np.mean([1 if l in np.unique(labels_train) else 0 for l in labels_test]))
+#     return dataset, data_loaders, (X_train, labels_train, X_test, labels_test)
+#
+# #
+# names = ['xin', 'segerstolpe', 'muraro', 'baron']
+# nb_genes = 300
+# batch_size = 128
+#
+# # dataset_ = GeneExpressionDataset.load_pickle('../scmap/d4-all.pickle')
+# # # #
+# # all_cell_types = list(
+# #     filter(lambda p: p not in ["unknown", "unclassified", "unclassified endocrine", "unclear"], dataset_.cell_types))
+# # dataset_.filter_cell_types(all_cell_types)
+#
+# sources = (0,)
+# target = 1
+# print("Sources : %s\nTarget : %s" % (' '.join([names[s] for s in sources]), names[target]))
+#
+# title = "%s -> %s" % (' '.join([names[s] for s in sources]), names[target])
+#
+# datasets = [XinDataset(), SegerstolpeDataset()]
+# dataset_ = GeneExpressionDataset.concat_datasets(*datasets)
+#
+# dataset, data_loaders, (X_train, labels_train, X_test, labels_test) = split_data(dataset_, sources,
+#                                                                                  target,
+#                                                                                  nb_genes=nb_genes,
+#                                                                                  batch_size=batch_size)
+#
+#
+# #dataset.filter_cell_types()
+# vae = VAE(dataset.nb_genes, dataset.n_batches, dataset.n_labels,
+#           n_layers=2, n_hidden=256, dropout_rate=0.1)
+# # 0.2 in dropout since we move it ?
+# infer = VariationalInference(vae, dataset, verbose=True, frequency=50)
+# infer.metrics_to_monitor+=['nn_latentspace']
+#
+# infer.data_loaders = data_loaders
+# infer.data_loaders.loop = ['all']
+# infer.data_loaders['train'] = data_loaders['all']
+# infer.train(300, lr=1e-3)
 
 
 # infer = SemiSupervisedVariationalInference(svaec, dataset, frequency=10, verbose=True,
@@ -160,7 +174,9 @@ infer.train(300, lr=1e-3)
 #     results_scmap = dict()
 # print("DOING SCMAP")
 # #print(results_scmap)
-# scmap = SCMAP()
+
+
+
 # for n_features in [300]:#, 500]:
 #     scmap.set_parameters(n_features=n_features)
 #     if n_features not in results_scmap:
