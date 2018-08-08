@@ -7,23 +7,23 @@ from torch.nn import functional as F
 
 from scvi.dataset import CortexDataset
 from scvi.dataset.data_loaders import DataLoaders
-from scvi.dataset.data_loaders import TrainTestDataLoaders, SemiSupervisedDataLoaders
+from scvi.dataset.data_loaders import TrainTestDataLoaders, SemiSupervisedDataLoaders, TrainTestDataLoadersFish
 from scvi.harmonization import SVC
-from scvi.metrics.classification import compute_accuracy  # compute_accuracy_svc, compute_accuracy_rf, \
 from scvi.metrics.classification import unsupervised_classification_accuracy, compute_accuracy_tuple, \
-    compute_predictions
-from scvi.metrics.clustering import clustering_scores
-from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap, select_indices_evenly
+    compute_predictions, unsupervised_clustering_accuracy, compute_accuracy, compute_accuracy_svc, compute_accuracy_rf
+from scvi.metrics.clustering import get_latent, entropy_batch_mixing, nn_overlap, select_indices_evenly,\
+    clustering_scores
 from scvi.metrics.differential_expression import de_stats, de_cortex
 from scvi.metrics.imputation import imputation, plot_imputation
-from scvi.metrics.log_likelihood import compute_log_likelihood, compute_marginal_log_likelihood
+from scvi.metrics.log_likelihood import compute_log_likelihood
+from scvi.metrics.visualization import color_dictionary
 from . import Inference, ClassifierInference
 
 import seaborn as sns
 plt.switch_backend('agg')
 
+colors_20 = sns.color_palette('tab20', 20)
 
-# Here only what we want to monitor or the essential tasks.
 class VariationalInference(Inference):
     r"""The VariationalInference class for the unsupervised training of an autoencoder.
 
@@ -44,9 +44,9 @@ class VariationalInference(Inference):
     """
     default_metrics_to_monitor = ['ll']
 
-    def __init__(self, model, gene_dataset, train_size=0.8, **kwargs):
+    def __init__(self, model, gene_dataset, train_size=0.8, kl=None, **kwargs):
         super(VariationalInference, self).__init__(model, gene_dataset, **kwargs)
-        self.kl = None
+        self.kl = kl
         self.data_loaders = TrainTestDataLoaders(self.gene_dataset, train_size=train_size, use_cuda=self.use_cuda)
 
     def loss(self, tensors):
@@ -94,7 +94,7 @@ class VariationalInference(Inference):
         plot_imputation(np.concatenate(original_list), np.concatenate(imputed_list), title=title)
         return original_list, imputed_list
 
-    def clustering_scores(self, name, verbose=True, prediction_algorithm='knn'):
+    def clustering_scores(self, name, verbose=False, prediction_algorithm='knn'):
         if self.gene_dataset.n_labels > 1:
             latent, _, labels = get_latent(self.model, self.data_loaders[name])
 
@@ -105,7 +105,7 @@ class VariationalInference(Inference):
                       (name, prediction_algorithm, scores['asw'], scores['nmi'], scores['ari'], scores['uca']))
             return scores
 
-    def nn_overlap_score(self, name='sequential', verbose=True, **kwargs):
+    def nn_overlap_score(self, name='sequential', verbose=False, **kwargs):
         if hasattr(self.gene_dataset, 'adt_expression_clr'):
             assert name == 'sequential'  # only works for the sequential data_loader (mapping indices)
             latent, _, _ = get_latent(self.model, self.data_loaders[name])
@@ -134,34 +134,37 @@ class VariationalInference(Inference):
 
     def entropy_batch_mixing(self, name, verbose=False, **kwargs):
         if self.gene_dataset.n_batches >= 2:
-            print("ignoring %s, doing on sequential" % name)
-            name = 'sequential'
-            latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])
-            be_score = entropy_batch_mixing(latent, batch_indices, **kwargs)
-            if verbose:
-                print("Entropy batch mixing %s is : %.4f" % (name, be_score))
-            return be_score
+            if len(self.data_loaders.to_monitor)>0 and name == self.data_loaders.to_monitor[0] or name=='sequential':
+                # only once
+                name = 'sequential'
+                latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])
+                be_score = entropy_batch_mixing(latent, batch_indices, **kwargs)
+                if verbose:
+                    print("Entropy batch mixing %s is : %.4f" % (name, be_score))
+                return be_score
 
     entropy_batch_mixing.mode = 'max'
 
-    def show_t_sne(self, name, n_samples=1000, color_by='', save_name='', uniform=False):
-        latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])
-        colors = sns.color_palette('tab20', 20)
-        if uniform:
-            idx_t_sne = np.random.permutation(len(latent))[:n_samples] if n_samples else np.arange(len(latent))
-        else:
-            idx_t_sne = select_indices_evenly(n_samples, batch_indices)
-        if latent.shape[1] != 2:
-            latent = TSNE().fit_transform(latent[idx_t_sne])
+    def show_t_sne(self, name, n_samples=1000, color_by='batches and labels', save_name='', latent=None, batch_indices=None,
+                   labels=None, n_batch=None, uniform=False):
+        # If no latent representation is given
+        if latent is None:
+            latent, batch_indices, labels = get_latent(self.model, self.data_loaders[name])
+            latent, idx_t_sne = self.apply_t_sne(latent, n_samples, uniform=uniform, batch_indices=batch_indices)
+            batch_indices = batch_indices[idx_t_sne].ravel()
+            labels = labels[idx_t_sne].ravel()
         if not color_by:
             plt.figure(figsize=(10, 10))
             plt.scatter(latent[:, 0], latent[:, 1])
+        if color_by == 'scalar':
+            plt.figure(figsize=(10, 10))
+            plt.scatter(latent[:, 0], latent[:, 1], c=labels.ravel())
         else:
-            batch_indices = batch_indices[idx_t_sne].ravel()
-            labels = labels[idx_t_sne].ravel()
+            if n_batch is None:
+                n_batch = self.gene_dataset.n_batches
             if color_by == 'batches' or color_by == 'labels':
                 indices = batch_indices if color_by == 'batches' else labels
-                n = self.gene_dataset.n_batches if color_by == 'batches' else self.gene_dataset.n_labels
+                n = n_batch if color_by == 'batches' else self.gene_dataset.n_labels
                 if hasattr(self.gene_dataset, 'cell_types') and color_by == 'labels':
                     plt_labels = self.gene_dataset.cell_types
                 else:
@@ -172,7 +175,7 @@ class VariationalInference(Inference):
                 plt.legend()
             elif color_by == 'batches and labels':
                 fig, axes = plt.subplots(1, 2, figsize=(14, 7))
-                for i in range(self.gene_dataset.n_batches):
+                for i in range(n_batch):
                     axes[0].scatter(latent[batch_indices == i, 0], latent[batch_indices == i, 1], label=str(i))
                 axes[0].set_title("batch coloring")
                 axes[0].axis("off")
@@ -184,7 +187,11 @@ class VariationalInference(Inference):
                 else:
                     plt_labels = [str(i) for i in range(len(np.unique(indices)))]
                 for i, cell_type in zip(range(self.gene_dataset.n_labels), plt_labels):
-                    axes[1].scatter(latent[indices == i, 0], latent[indices == i, 1], label=cell_type, c=colors[i%20])
+                    if cell_type in color_dictionary:
+                        c = color_dictionary[cell_type]
+                    else:
+                        c = colors_20[i]
+                    axes[1].scatter(latent[indices == i, 0], latent[indices == i, 1], label=cell_type, c=c)
                 axes[1].set_title("label coloring")
                 axes[1].axis("off")
                 axes[1].legend()
@@ -194,15 +201,25 @@ class VariationalInference(Inference):
         if save_name:
             plt.savefig(save_name)
 
-    def nn_latentspace(self, name, verbose=True, **kwargs):
+    @staticmethod
+    def apply_t_sne(latent, n_samples=1000, uniform=False, batch_indices=None):
+        if uniform:
+            idx_t_sne = np.random.permutation(len(latent))[:n_samples] if n_samples else np.arange(len(latent))
+        else:
+            idx_t_sne = select_indices_evenly(n_samples, batch_indices)
+        if latent.shape[1] != 2:
+            latent = TSNE().fit_transform(latent[idx_t_sne])
+        return latent, idx_t_sne
+
+    def nn_latentspace(self, name, verbose=False, **kwargs):
         data_train, _, labels_train = self.get_latent('labelled')
         data_test, _, labels_test = self.get_latent('unlabelled')
         nn = KNeighborsClassifier()
         nn.fit(data_train, labels_train)
         score = nn.score(data_test, labels_test)
-
-        print("NN classifier score:", score)
-        print("NN classifier tuple:", compute_accuracy_tuple(labels_test, nn.predict(data_test)))
+        if verbose:
+            print("NN classifier score:", score)
+            print("NN classifier tuple:", compute_accuracy_tuple(labels_test, nn.predict(data_test)))
         return score
 
     def svc_latent_space(self, unit_test=False):
@@ -252,14 +269,21 @@ class SemiSupervisedVariationalInference(VariationalInference):
 
     def loss(self, tensors_all, tensors_labelled):
         loss = super(SemiSupervisedVariationalInference, self).loss(tensors_all)
+        self.model.eval()  # We just want to avoid batch norm but remove dropout as well -> to be improved
         sample_batch, _, _, _, y = tensors_labelled
         classification_loss = F.cross_entropy(self.model.classify(sample_batch), y.view(-1))
         loss += classification_loss * self.classification_ratio
+        self.model.train_wo_batch_norm(batch_norm=True)
         return loss
 
-    def on_epoch_end(self):
-        self.classifier_inference.train(self.n_epochs_classifier, lr=self.lr_classification)
-        return super(SemiSupervisedVariationalInference, self).on_epoch_end()
+    def on_epoch_begin(self):
+        super(SemiSupervisedVariationalInference, self).on_epoch_begin()
+
+    def on_epoch_end(self, batch_norm=True):
+        self.model.eval()
+        self.classifier_inference.train(self.n_epochs_classifier, lr=self.lr_classification, batch_norm=False)
+        self.model.train_wo_batch_norm(batch_norm=True)
+        return super(SemiSupervisedVariationalInference, self).on_epoch_end(batch_norm=True)
 
     def accuracy(self, name, verbose=False):
         acc = compute_accuracy(self.model, self.data_loaders[name])
@@ -284,7 +308,7 @@ class SemiSupervisedVariationalInference(VariationalInference):
 
     accuracy.mode = 'max'
 
-    def benchmark_accuracy(self, name, last_n_values=10, verbose=False):
+    def benchmark_accuracy(self, name, last_n_values=5, verbose=False):
         values = self.history['accuracy_' + name][-last_n_values:]
         mean = np.mean(values)
         std = 2 * np.sqrt(np.var(values)) / np.sqrt(last_n_values)
@@ -314,8 +338,8 @@ class SemiSupervisedVariationalInference(VariationalInference):
         else:
             raw_data = DataLoaders.raw_data(self.data_loaders['labelled'], self.data_loaders['unlabelled'])
         (data_train, labels_train), (data_test, labels_test) = raw_data
-        svc_scores = compute_accuracy_svc(data_train, labels_train, data_test, labels_test, **kwargs)
-        rf_scores = compute_accuracy_rf(data_train, labels_train, data_test, labels_test, **kwargs)
+        svc_scores, _ = compute_accuracy_svc(data_train, labels_train, data_test, labels_test, **kwargs)
+        rf_scores, _ = compute_accuracy_rf(data_train, labels_train, data_test, labels_test, **kwargs)
         return svc_scores, rf_scores
 
 
@@ -366,3 +390,91 @@ class JointSemiSupervisedVariationalInference(SemiSupervisedVariationalInference
     def __init__(self, *args, **kwargs):
         kwargs['n_epochs_classifier'] = 0
         super(JointSemiSupervisedVariationalInference, self).__init__(*args, **kwargs)
+
+
+class VariationalInferenceFish(VariationalInference):
+    r"""The VariationalInference class for the unsupervised training of an autoencoder.
+
+    Args:
+        :model: A model instance from class ``VAE``, ``VAEC``, ``SVAEC``
+        :gene_dataset: A gene_dataset instance like ``CortexDataset()``
+        :train_size: The train size, either a float between 0 and 1 or and integer for the number of training samples
+         to use Default: ``0.8``.
+        :**kwargs: Other keywords arguments from the general Inference class.
+
+    Examples:
+        >>> gene_dataset_seq = CortexDataset()
+        >>> gene_dataset_fish = SmfishDataset()
+        >>> vae = VAE(gene_dataset_seq.nb_genes, gene_dataset_fish.nb_genes,
+        ... n_labels=gene_dataset.n_labels, use_cuda=True)
+
+        >>> infer = VariationalInference(gene_dataset_seq, gene_dataset_fish, vae, train_size=0.5)
+        >>> infer.train(n_epochs=20, lr=1e-3)
+    """
+    default_metrics_to_monitor = ['ll']
+
+    def __init__(self, model, gene_dataset_seq, gene_dataset_fish, train_size=0.8, use_cuda=True, cl_ratio=0,
+                 n_epochs_even=1, n_epochs_kl=2000, n_epochs_cl=1,  **kwargs):
+        super(VariationalInferenceFish, self).__init__(model, gene_dataset_seq, use_cuda=use_cuda, **kwargs)
+        self.kl = None
+        self.cl_ratio = cl_ratio
+        self.n_epochs_cl = n_epochs_cl
+        self.n_epochs_even = n_epochs_even
+        self.n_epochs_kl = n_epochs_kl
+        self.weighting = 0
+        self.kl_weight = 0
+        self.classification_ponderation = 0
+        self.data_loaders = TrainTestDataLoadersFish(gene_dataset_seq, gene_dataset_fish,
+                                                     train_size=train_size, use_cuda=use_cuda)
+
+    def loss(self, tensors_seq, tensors_fish):
+        sample_batch, local_l_mean, local_l_var, batch_index, labels = tensors_seq
+        reconst_loss, kl_divergence = self.model(sample_batch, local_l_mean, local_l_var, batch_index, mode="scRNA",
+                                                 weighting=self.weighting)
+        # If we want to add a classification loss
+        if self.cl_ratio != 0:
+            reconst_loss += self.cl_ratio * F.cross_entropy(self.model.classify(sample_batch, mode="scRNA"),
+                                                            labels.view(-1))
+        loss = torch.mean(reconst_loss + self.kl_weight * kl_divergence)
+        sample_batch_fish, local_l_mean, local_l_var, batch_index_fish, _, _, _ = tensors_fish
+        reconst_loss_fish, kl_divergence_fish = self.model(sample_batch_fish, local_l_mean, local_l_var,
+                                                           batch_index_fish, mode="smFISH")
+        loss_fish = torch.mean(reconst_loss_fish + self.kl_weight * kl_divergence_fish)
+        loss = loss * sample_batch.size(0) + loss_fish * sample_batch_fish.size(0)
+        loss /= (sample_batch.size(0) + sample_batch_fish.size(0))
+        return loss + loss_fish
+
+    def on_epoch_begin(self):
+        self.weighting = min(1, self.epoch / self.n_epochs_even)
+        self.kl_weight = self.kl if self.kl is not None else min(1,  self.epoch / self.n_epochs_kl)
+        self.classification_ponderation = min(1, self.epoch / self.n_epochs_cl)
+
+    def ll(self, name, verbose=False):
+        data_loader = self.data_loaders[name]
+        log_lkl = 0
+        for i_batch, tensors in enumerate(data_loader):
+            if name == "train_fish" or name == "test_fish":
+                sample_batch, local_l_mean, local_l_var, batch_index, labels, _, _ = tensors
+                reconst_loss, kl_divergence = self.model(sample_batch, local_l_mean, local_l_var,
+                                                         batch_index=batch_index,
+                                                         y=labels, mode="smFISH")
+            else:
+                sample_batch, local_l_mean, local_l_var, batch_index, labels = tensors
+                reconst_loss, kl_divergence = self.model(sample_batch, local_l_mean, local_l_var,
+                                                         batch_index=batch_index, y=labels)
+            log_lkl += torch.sum(reconst_loss).item()
+        n_samples = (len(data_loader.dataset)
+                     if not (hasattr(data_loader, 'sampler') and hasattr(data_loader.sampler, 'indices')) else
+                     len(data_loader.sampler.indices))
+        ll = log_lkl / n_samples
+        if verbose:
+            print("LL for %s is : %.4f" % (name, ll))
+        return ll
+
+    def show_spatial_expression(self, x_coord, y_coord, labels, color_by='scalar', title='spatial_expression.svg'):
+        x_coord = x_coord.reshape(-1, 1)
+        y_coord = y_coord.reshape(-1, 1)
+        latent = np.concatenate((x_coord, y_coord), axis=1)
+        self.show_t_sne(name=None, n_samples=1000, color_by=color_by, save_name=title,
+                        latent=latent, batch_indices=None,
+                        labels=labels)

@@ -10,8 +10,6 @@ import loompy
 import numpy as np
 import scipy.sparse as sp_sparse
 import torch
-import urllib.request
-from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset
 
@@ -62,10 +60,18 @@ class GeneExpressionDataset(Dataset):
             X = torch.from_numpy(self.X[indexes])
         else:
             X = torch.FloatTensor(self.X[indexes].toarray())
-        return X, torch.FloatTensor(self.local_means[indexes]), \
-               torch.FloatTensor(self.local_vars[indexes]), \
-               torch.LongTensor(self.batch_indices[indexes]), \
-               torch.LongTensor(self.labels[indexes])
+        if self.x_coord is None or self.y_coord is None:
+            return X, torch.FloatTensor(self.local_means[indexes]), \
+                   torch.FloatTensor(self.local_vars[indexes]), \
+                   torch.LongTensor(self.batch_indices[indexes]), \
+                   torch.LongTensor(self.labels[indexes])
+        else:
+            return X, torch.FloatTensor(self.local_means[indexes]), \
+                   torch.FloatTensor(self.local_vars[indexes]), \
+                   torch.LongTensor(self.batch_indices[indexes]), \
+                   torch.LongTensor(self.labels[indexes]), \
+                   torch.FloatTensor(self.x_coord[indexes]), \
+                   torch.FloatTensor(self.y_coord[indexes])
 
     def update_genes(self, subset_genes):
         if hasattr(self, 'gene_names'):
@@ -83,7 +89,7 @@ class GeneExpressionDataset(Dataset):
     def subsample_genes(self, new_n_genes=None, subset_genes=None):
         n_cells, n_genes = self.X.shape
         if subset_genes is None and \
-            (not hasattr(self, 'gene_names') or new_n_genes is False or new_n_genes >= n_genes):
+                (not hasattr(self, 'gene_names') or new_n_genes is False or new_n_genes >= n_genes):
             return None  # Do nothing if subsample more genes than total number of genes
         if subset_genes is None:
             print("Downsampling from %i to %i genes" % (n_genes, new_n_genes))
@@ -95,14 +101,6 @@ class GeneExpressionDataset(Dataset):
             print("Downsampling from %i to %i genes" % (n_genes, new_n_genes))
         self.X = self.X[:, subset_genes]
         self.update_genes(subset_genes)
-
-    def subsample_genes_m3drop(self, new_n_genes):
-        log_m = np.log(np.mean(self.X, axis=0) + 1e-5).reshape(-1, 1)
-        log_d = np.log(np.sum((self.X == 0), axis=0) + 1e-5).reshape(-1, 1)
-        lin_reg = LinearRegression()
-        lin_reg.fit(log_m, log_d)
-        subset_genes = np.argsort(np.abs(lin_reg.predict(log_m) - log_d).ravel())[::-1]
-        self.subsample_genes(subset_genes=subset_genes[:new_n_genes])
 
     def filter_genes(self, gene_names_ref, on='gene_names'):
         """
@@ -182,6 +180,8 @@ class GeneExpressionDataset(Dataset):
         file_attrs = dict()
         if hasattr(self, "gene_names"):
             row_attrs["Gene"] = self.gene_names
+        if hasattr(self, "gene_symbols"):
+            row_attrs["gene_symbols"] = self.gene_symbols
         if hasattr(self, "cell_types"):
             file_attrs["CellTypes"] = self.cell_types
         loompy.create("data/" + filename, self.X.T, row_attrs, col_attrs, file_attrs=file_attrs)
@@ -341,7 +341,7 @@ class GeneExpressionDataset(Dataset):
         batch_count = np.zeros((self.n_batches, self.n_labels))
         for j in range(self.n_labels):
             for i, c in zip(*np.unique((self.labels[(self.batch_indices == j).ravel()]), return_counts=True)):
-                batch_count[j, i] = c
+                batch_count[int(j), int(i)] = c
         return batch_count.astype(np.int).__str__()
 
 

@@ -5,10 +5,9 @@ from torch import nn as nn
 from torch.nn import Linear
 
 from scvi.metrics.clustering import get_latent_mean
-from scvi.models.modules import FCLayers
+from scvi.models.modules import FCLayers, Module
 
-
-class Classifier(nn.Module):
+class Classifier(Module):
     def __init__(self, n_input, n_hidden=128, n_labels=10, n_layers=1, dropout_rate=0.1):
         super(Classifier, self).__init__()
         self.layers = FCLayers(n_in=n_input, n_out=n_hidden, n_layers=n_layers, n_hidden=n_hidden,

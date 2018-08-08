@@ -10,12 +10,13 @@ from sklearn.mixture import GaussianMixture as GMM
 from sklearn.neighbors import NearestNeighbors
 from sklearn.utils.linear_assignment_ import linear_assignment
 
+
 def unsupervised_clustering_accuracy(y, y_pred):
     """
     Unsupervised Clustering Accuracy
     """
     assert len(y_pred) == len(y)
-    u = np.unique(y)
+    u = np.unique(np.concatenate((y, y_pred)))
     n_clusters = len(u)
     mapping = dict(zip(u, range(n_clusters)))
     reward_matrix = np.zeros((n_clusters, n_clusters), dtype=np.int64)
@@ -25,6 +26,7 @@ def unsupervised_clustering_accuracy(y, y_pred):
     cost_matrix = reward_matrix.max() - reward_matrix
     ind = linear_assignment(cost_matrix)
     return sum([reward_matrix[i, j] for i, j in ind]) * 1.0 / y_pred.size, ind
+
 
 def clustering_scores(latent, labels, prediction_algorithm='knn', n_labels=None):
     if n_labels is not None:
@@ -44,11 +46,14 @@ def clustering_scores(latent, labels, prediction_algorithm='knn', n_labels=None)
         # 'uca': unsupervised_clustering_accuracy(labels, labels_pred)[0]
     }
 
+
 def get_latent_mean(vae, data_loader):
     latents, batch_indices, labels = get_latents(vae, data_loader)
     return latents[0], batch_indices, labels
 
+
 get_latent = get_latent_mean
+
 
 def get_latents(vae, data_loader):
     latents = [[]] * vae.n_latent_layers
@@ -104,6 +109,7 @@ def select_indices_evenly(n_samples, categorical_indices):
         indices += [indices_i[np.random.permutation(len(indices_i))][:n_samples]]
     return np.concatenate(indices, axis=0)
 
+
 def nn_overlap(X1, X2, k=100):
     nne = NearestNeighbors(n_neighbors=k + 1, n_jobs=8)
     assert len(X1) == len(X2)
@@ -121,8 +127,10 @@ def nn_overlap(X1, X2, k=100):
     fold_enrichment = len(set_1.intersection(set_2)) * n_samples ** 2 / (float(len(set_1)) * len(set_2))
     return spearman_correlation, fold_enrichment
 
+
 def entropy_from_indices(indices):
     return entropy(np.array(itemfreq(indices)[:, 1].astype(np.int32)))
+
 
 def entropy_batch_mixing(latent_space, batches, n_neighbors=50):
     batches = batches.ravel()
