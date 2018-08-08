@@ -41,7 +41,7 @@ def clustering_scores(latent, labels, prediction_algorithm='knn', n_labels=None)
         'asw': silhouette_score(latent, labels),
         'nmi': NMI(labels, labels_pred),
         'ari': ARI(labels, labels_pred),
-        'uca': unsupervised_clustering_accuracy(labels, labels_pred)[0]
+        # 'uca': unsupervised_clustering_accuracy(labels, labels_pred)[0]
     }
 
 def get_latent_mean(vae, data_loader):

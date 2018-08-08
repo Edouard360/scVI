@@ -1,3 +1,4 @@
+from scvi.dataset import SemiSupervisedDataLoaders
 from scvi.models import SVAEC
 
 use_cuda = True
@@ -40,9 +41,9 @@ labels_groups = [[i for i, x in enumerate(groups) if y.startswith(x)][0] for y i
 coarse_labels_dict = dict(zip(np.arange(len(labels_groups)), labels_groups))
 coarse_labels = np.asarray([coarse_labels_dict[x] for x in new_labels])
 gene_dataset.cell_types = np.asarray(groups)[np.unique(coarse_labels)]
-gene_dataset.labels = np.unique(coarse_labels, return_inverse=True)[1].reshape(len(coarse_labels),1)
+gene_dataset.labels = np.unique(coarse_labels, return_inverse=True)[1].reshape(len(coarse_labels), 1)
 
-for prob_i in range(50):
+for prob_i in range(5):
     correlation = min - 0.01
     while (correlation < min or correlation > max):
         cellid = np.arange(0, len(batch_id))
@@ -72,14 +73,19 @@ for prob_i in range(50):
         infer.train(n_epochs=250)
         latent, batch_indices, labels = infer.get_latent('sequential')
     elif method == 'svaec':
-        svaec = SVAEC(gene_dataset.nb_genes, gene_dataset.n_batches,
-                      gene_dataset.n_labels, use_labels_groups=False,
-                      n_latent=10, n_layers=2)
-        infer = SemiSupervisedVariationalInference(svaec, gene_dataset)
-        infer.train(n_epochs=50)
+        svaec = SVAEC(sub_dataset.nb_genes, sub_dataset.n_batches,
+                      sub_dataset.n_labels)
+        infer = SemiSupervisedVariationalInference(svaec, sub_dataset, verbose=True, classification_ratio=1,
+                                                   n_epochs_classifier=1, lr_classification=5 * 10e-3, frequency=10)
+        data_loaders = SemiSupervisedDataLoaders(sub_dataset)
+        data_loaders['labelled'] = data_loaders(indices=(sub_dataset.batch_indices == i).ravel())
+        data_loaders['unlabelled'] = data_loaders(indices=(sub_dataset.batch_indices == (1 - i)).ravel())
+        infer.metrics_to_monitor = ['ll', 'accuracy', 'entropy_batch_mixing']
+        infer.data_loaders = data_loaders
+        infer.classifier_inference.data_loaders['train'] = data_loaders['labelled']
+        infer.train(n_epochs=100)
         print('svaec acc =', infer.accuracy('unlabelled'))
-        data_loader = infer.data_loaders['unlabelled']
-        latent, batch_indices, labels = get_latent(infer.model, infer.data_loaders['unlabelled'])
+        latent, batch_indices, labels = infer.get_latent('unlabelled')
         keys = gene_dataset.cell_types
         batch_indices = np.concatenate(batch_indices)
     keys = sub_dataset.cell_types
@@ -90,7 +96,6 @@ for prob_i in range(50):
         latent[sample, :], labels[sample].astype('int'),
         keys=keys, acc=True
     )
-    print('average classification accuracy per cluster')
     for x in res:
         print(x)
     knn_acc = np.mean([x[1] for x in res])

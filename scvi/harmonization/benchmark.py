@@ -1,6 +1,5 @@
 import numpy as np
 from scvi.dataset import GeneExpressionDataset
-from scvi.metrics.clustering import get_latent, entropy_batch_mixing
 
 from scipy import sparse
 from copy import deepcopy
@@ -16,19 +15,6 @@ def sample_by_batch(batch_indices, nsamples):
         sample.append(s)
     sample = np.concatenate(sample)
     return sample
-
-def harmonization_stat(latent, batch_indices,labels,keys):
-    sample = sample_by_batch(batch_indices, 2000)
-    sample_2batch = sample[(batch_indices[sample] == pop1) + (batch_indices[sample] == pop2)]
-    batch_entropy = entropy_batch_mixing(latent[sample_2batch, :], batch_indices[sample_2batch])
-    print("Entropy batch mixing : %f.3" % batch_entropy)
-    sample = sample_by_batch(labels, 200)
-    res = knn_purity_avg(
-        latent[sample,:], labels.astype('int')[sample],
-        keys, acc=True
-    )
-    print("Average knn purity : %f.3" % np.mean([x[1] for x in res]))
-    return(batch_entropy,res)
 
 
 def ind_log_likelihood(vae, data_loader):
