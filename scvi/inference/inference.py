@@ -96,9 +96,8 @@ class Inference:
             with trange(n_epochs, desc="training", file=sys.stdout, disable=self.verbose) as pbar:
                 # We have to use tqdm this way so it works in Jupyter notebook.
                 # See https://stackoverflow.com/questions/42212810/tqdm-in-jupyter-notebook
-                self.on_epoch_begin()
-
                 for epoch in pbar:
+                    self.on_epoch_begin()
                     pbar.update(1)
                     for tensors_list in self.data_loaders:
                         loss = self.loss(*tensors_list)

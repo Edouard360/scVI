@@ -56,7 +56,7 @@ get_latent = get_latent_mean
 
 
 def get_latents(vae, data_loader):
-    latents = [[]] * vae.n_latent_layers
+    latents = [[] for _ in range(vae.n_latent_layers)]
     batch_indices = []
     labels = []
     for tensors in data_loader:
@@ -132,13 +132,28 @@ def entropy_from_indices(indices):
     return entropy(np.array(itemfreq(indices)[:, 1].astype(np.int32)))
 
 
-def entropy_batch_mixing(latent_space, batches, n_neighbors=50):
+def entropy_batch_mixing(latent_space, batches, n_neighbors=50, n_pools=50, n_samples_per_pool=100, max_number=500):
+    n_samples = len(latent_space)
+    keep_idx = np.random.choice(np.arange(n_samples), size=min(len(latent_space), max_number), replace=False)
+    latent_space, batches = latent_space[keep_idx], batches[keep_idx]
+
     batches = batches.ravel()
     nbrs = NearestNeighbors(n_neighbors=n_neighbors + 1).fit(latent_space)
     indices = nbrs.kneighbors(latent_space, return_distance=False)[:, 1:]
     batch_indices = np.vectorize(lambda i: batches[i])(indices)
-    return np.mean(np.apply_along_axis(entropy_from_indices, axis=1, arr=batch_indices))
+    entropies = np.apply_along_axis(entropy_from_indices, axis=1, arr=batch_indices)
 
-# latent_space = np.random.rand(1000,10)
-# batches = np.random.randint(2, size=1000)
-# entropy_batch_mixing(latent_space, batches)
+    # average n_pools entropy results where each result is an average of n_samples_per_pool random samples.
+    if n_pools == 1:
+        score = np.mean(entropies)
+    else:
+        score = np.mean([
+            np.mean(entropies[np.random.choice(len(entropies), size=n_samples_per_pool)])
+            for _ in range(n_pools)
+        ])
+
+    return score
+
+
+def entropy_from_indices(indices):
+    return entropy(np.array(itemfreq(indices)[:, 1].astype(np.int32)))
