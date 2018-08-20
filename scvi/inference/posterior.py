@@ -21,6 +21,11 @@ from torch.utils.data.sampler import SequentialSampler, SubsetRandomSampler, Ran
 from scvi.dataset import CortexDataset
 from scvi.models.log_likelihood import compute_log_likelihood, compute_marginal_log_likelihood
 
+from scvi.dataset.BICCN import macosko_regev_dictionary
+import seaborn as sns
+plt.switch_backend('agg')
+
+colors_20 = sns.color_palette('tab20', 20)
 
 class SequentialSubsetSampler(SubsetRandomSampler):
     def __iter__(self):
@@ -363,7 +368,11 @@ class Posterior:
                 else:
                     plt_labels = [str(i) for i in range(len(np.unique(indices)))]
                 for i, cell_type in zip(range(self.gene_dataset.n_labels), plt_labels):
-                    axes[1].scatter(latent[indices == i, 0], latent[indices == i, 1], label=cell_type)
+                    if cell_type in color_dictionary:
+                        c = color_dictionary[cell_type]
+                    else:
+                        c = colors_20[i]
+                    axes[1].scatter(latent[indices == i, 0], latent[indices == i, 1], label=cell_type, c=c)
                 axes[1].set_title("label coloring")
                 axes[1].axis("off")
                 axes[1].legend()
@@ -631,3 +640,16 @@ def proximity_imputation(real_latent1, normed_gene_exp_1, real_latent2, k=4):
     knn = KNeighborsRegressor(k, weights='distance')
     y = knn.fit(real_latent1, normed_gene_exp_1).predict(real_latent2)
     return y
+
+color_dictionary = dict()
+color_dictionary.update(macosko_regev_dictionary)
+
+pancreas_dictionary = {
+    'alpha': sns.color_palette("Blues")[0],
+    'beta': sns.color_palette("Greens")[0],
+    'gamma': sns.color_palette("Reds")[0],
+    'delta': sns.dark_palette("yellow", 3)[2],
+    'co-expression': sns.color_palette("Greys")[0],
+}
+
+color_dictionary.update(pancreas_dictionary)
