@@ -1,8 +1,10 @@
+from typing import Sequence
+
 import numpy as np
 import torch
 from torch.distributions import Normal, Categorical, kl_divergence as kl
 
-from scvi.models.classifier import Classifier, LinearLogRegClassifier
+from scvi.models.classifier import Classifier
 from scvi.models.modules import Decoder, Encoder
 from scvi.models.utils import broadcast_labels
 from scvi.models.vae import VAE
@@ -10,50 +12,57 @@ from scvi.models.vae import VAE
 
 class SCANVI(VAE):
     r"""A semi-supervised Variational auto-encoder model - inspired from M1 + M2 model,
-    as described in (https://arxiv.org/pdf/1406.5298.pdf). S stand for "Stacked" variational autoencoder
-    and C for classification - SVAEC
+    as described in (https://arxiv.org/pdf/1406.5298.pdf). SCANVI stands for single-cell annotation using
+    variational inference.
 
-    Args:
-        :n_input: Number of input genes.
-        :n_batch: Default: ``0``.
-        :n_labels: Default: ``0``.
-        :n_hidden: Number of hidden. Default: ``128``.
-        :n_latent: Default: ``1``.
-        :n_layers: Number of layers. Default: ``1``.
-        :dropout_rate: Default: ``0.1``.
-        :dispersion: Default: ``"gene"``.
-        :log_variational: Default: ``True``.
-        :reconstruction_loss: Default: ``"zinb"``.
-        :y_prior: Default: None, but will be initialized to uniform probability over the cell types if not specified
+    :param n_input: Number of input genes
+    :param n_batch: Number of batches
+    :param n_labels: Number of labels
+    :param n_hidden: Number of nodes per hidden layer
+    :param n_latent: Dimensionality of the latent space
+    :param n_layers: Number of hidden layers used for encoder and decoder NNs
+    :param dropout_rate: Dropout rate for neural networks
+    :param dispersion: One of the following
+
+        * ``'gene'`` - dispersion parameter of NB is constant per gene across cells
+        * ``'gene-batch'`` - dispersion can differ between different batches
+        * ``'gene-label'`` - dispersion can differ between different labels
+        * ``'gene-cell'`` - dispersion can differ for every gene in every cell
+
+    :param log_variational: Log variational distribution
+    :param reconstruction_loss:  One of
+
+        * ``'nb'`` - Negative binomial distribution
+        * ``'zinb'`` - Zero-inflated negative binomial distribution
+
+    :param y_prior: If None, initialized to uniform probability over cell types
+    :param labels_groups: Label group designations
+    :param use_labels_groups: Whether to use the label groups
 
     Examples:
         >>> gene_dataset = CortexDataset()
-        >>> svaec = SCANVI(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches * False,
+        >>> scanvi = SCANVI(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches * False,
         ... n_labels=gene_dataset.n_labels)
 
         >>> gene_dataset = SyntheticDataset(n_labels=3)
-        >>> svaec = SCANVI(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches * False,
+        >>> scanvi = SCANVI(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches * False,
         ... n_labels=3, y_prior=torch.tensor([[0.1,0.5,0.4]]), labels_groups=[0,0,1])
     """
 
-    def __init__(self, n_input, n_batch, n_labels, n_hidden=128, n_latent=10, n_layers=1, dropout_rate=0.1,
-                 y_prior=None, logreg_classifier=False, dispersion="gene", log_variational=True,
-                 reconstruction_loss="zinb", labels_groups=None, use_labels_groups=False, classifier_parameters=dict(),
-                 decoder_scvi_parameters=dict()):
+    def __init__(self, n_input: int, n_batch: int = 0, n_labels: int = 0,
+                 n_hidden: int = 128, n_latent: int = 10, n_layers: int = 1,
+                 dropout_rate: float = 0.1, dispersion: str = "gene",
+                 log_variational: bool = True, reconstruction_loss: str = "zinb",
+                 y_prior=None, labels_groups: Sequence[int] = None, use_labels_groups: bool = False):
         super(SCANVI, self).__init__(n_input, n_hidden=n_hidden, n_latent=n_latent, n_layers=n_layers,
                                      dropout_rate=dropout_rate, n_batch=n_batch, dispersion=dispersion,
-                                     log_variational=log_variational, reconstruction_loss=reconstruction_loss,
-                                     decoder_scvi_parameters=decoder_scvi_parameters)
+                                     log_variational=log_variational, reconstruction_loss=reconstruction_loss)
 
         self.n_labels = n_labels
         self.n_latent_layers = 2
         # Classifier takes n_latent as input
-        if logreg_classifier:
-            self.classifier = LinearLogRegClassifier(n_latent, self.n_labels)
-        else:
-            cls_parameters = {"n_layers":n_layers, "n_hidden":n_hidden, "dropout_rate":dropout_rate}
-            cls_parameters.update(classifier_parameters)
-            self.classifier = Classifier(n_latent,n_labels=self.n_labels, **cls_parameters)
+
+        self.classifier = Classifier(n_latent, n_hidden, self.n_labels, n_layers, dropout_rate)
 
         self.encoder_z2_z1 = Encoder(n_latent, n_latent, n_cat_list=[self.n_labels], n_layers=n_layers,
                                      n_hidden=n_hidden, dropout_rate=dropout_rate)
@@ -133,5 +142,6 @@ class SCANVI(VAE):
         kl_divergence = (kl_divergence_z2.view(self.n_labels, -1).t() * probs).sum(dim=1)
         kl_divergence += kl(Categorical(probs=probs),
                             Categorical(probs=self.y_prior.repeat(probs.size(0), 1)))
+        kl_divergence += kl_divergence_l
 
         return reconst_loss, kl_divergence
