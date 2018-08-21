@@ -1,12 +1,15 @@
 import numpy as np
+import torch
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GridSearchCV
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from torch.nn import functional as F
+from torch.utils.data import TensorDataset
 
 from scvi.inference import Trainer
 from scvi.inference.inference import UnsupervisedTrainer
-from scvi.inference.posterior import compute_accuracy_classifier
+from scvi.inference.posterior import compute_accuracy_classifier, compute_accuracy_tuple
 
 
 class ClassifierTrainer(Trainer):
@@ -121,8 +124,21 @@ class SemiSupervisedTrainer(UnsupervisedTrainer):
         return loss
 
     def on_epoch_end(self):
+        self.model.eval()
         self.classifier_trainer.train(self.n_epochs_classifier, lr=self.lr_classification)
+        self.model.train()
         return super(SemiSupervisedTrainer, self).on_epoch_end()
+
+    def nn_latentspace(self, verbose=False):
+        data_train, _, labels_train = self.labelled_set.get_latent()
+        data_test, _, labels_test = self.unlabelled_set.get_latent()
+        nn = KNeighborsClassifier()
+        nn.fit(data_train, labels_train)
+        score = nn.score(data_test, labels_test)
+        if verbose:
+            print("NN classifier score:", score)
+            print("NN classifier tuple:", compute_accuracy_tuple(labels_test, nn.predict(data_test)))
+        return score
 
 
 class JointSemiSupervisedTrainer(SemiSupervisedTrainer):
@@ -141,6 +157,66 @@ class AlternateSemiSupervisedTrainer(SemiSupervisedTrainer):
     @property
     def posteriors_loop(self):
         return ['full_dataset']
+
+
+class SemiSupervisedVariationalTrainerKnn(SemiSupervisedTrainer):
+    def __init__(self, *args, frequency_knn=10, **kwargs):
+        super(SemiSupervisedVariationalTrainerKnn, self).__init__(*args, **kwargs)
+        self.frequency_knn = frequency_knn
+
+    def update_unlabelled_knn(self):
+        with torch.set_grad_enabled(False):
+            def normalize(probs, max_prob=0.9):
+                max_probs = probs.max(axis=1)
+                p_uniform = (1 - max_prob) / (probs.shape[1] - 1)
+                probs[max_probs == 1] = (probs[max_probs == 1] * (0.9 - p_uniform)) + p_uniform
+                return probs
+
+            self.model.eval()
+            latent_train, _, labels_train = self.labelled_set.get_latent()
+            latent_test, _, labels_test = self.unlabelled_set.sequential().get_latent()  # need original counts as input
+            counts_test, _ = self.unlabelled_set.sequential().raw_data()
+            nn = KNeighborsClassifier()
+            # on a subset of the train data restriction
+            # latent_train = latent_train
+            # labels_train = labels_train
+            nn.fit(latent_train, labels_train)
+            print("SCORE nn :", nn.score(latent_test, labels_test))
+
+            proba_test = nn.predict_proba(latent_test)
+            normalized_proba_test = normalize(proba_test)
+            classification_ratio = np.zeros((len(latent_test), self.gene_dataset.n_labels))
+            classification_ratio[:, nn.classes_] = normalized_proba_test
+
+            # classification_ratio = -np.log(1 - classification_ratio)
+            classification_ratio = np.log(classification_ratio + 1e-8)
+
+            labelled_test_set = TensorDataset(torch.from_numpy(counts_test.astype(np.float32)),
+                                              torch.from_numpy(labels_test.astype(np.int64)),
+                                              torch.from_numpy(classification_ratio.astype(np.float32)))
+
+            self.unlabelled_knn = self.create_posterior(gene_dataset=labelled_test_set, shuffle=True)
+            self.model.train()
+
+    @property
+    def posteriors_loop(self):
+        return ['full_dataset', 'labelled_set', 'unlabelled_knn']
+
+    def loss(self, tensors_all, tensors_labelled, tensors_unlabelled_knn):
+        self.model.eval()
+        loss = super(SemiSupervisedVariationalTrainerKnn, self).loss(tensors_all, tensors_labelled)
+        sample_batch, labels, classification_ratio = tensors_unlabelled_knn
+
+        loss_classification = - 50*torch.sum(self.model.classify(sample_batch) * classification_ratio)
+        # loss_classification = F.cross_entropy(self.model.classify(sample_batch),labels.view(-1))
+        self.model.train()
+        return loss + loss_classification
+
+    def on_epoch_begin(self):
+        if self.epoch % self.frequency_knn == 0:
+            print("Updating unlabelled data_loader with KNN")
+            self.update_unlabelled_knn()
+        super(SemiSupervisedVariationalTrainerKnn, self).on_epoch_begin()
 
 
 def compute_accuracy_svc(data_train, labels_train, data_test, labels_test, param_grid=None, verbose=0, max_iter=-1):
