@@ -3,7 +3,7 @@ from typing import Sequence
 import numpy as np
 import torch
 from torch.distributions import Normal, Categorical, kl_divergence as kl
-
+import torch.nn as nn
 from scvi.models.classifier import Classifier
 from scvi.models.modules import Decoder, Encoder
 from scvi.models.utils import broadcast_labels
@@ -53,7 +53,8 @@ class SCANVI(VAE):
                  n_hidden: int = 128, n_latent: int = 10, n_layers: int = 1,
                  dropout_rate: float = 0.1, dispersion: str = "gene",
                  log_variational: bool = True, reconstruction_loss: str = "zinb",
-                 y_prior=None, labels_groups: Sequence[int] = None, use_labels_groups: bool = False):
+                 y_prior=None, labels_groups: Sequence[int] = None, use_labels_groups: bool = False,
+                 classifier_parameters:dict =dict()):
         super(SCANVI, self).__init__(n_input, n_hidden=n_hidden, n_latent=n_latent, n_layers=n_layers,
                                      dropout_rate=dropout_rate, n_batch=n_batch, dispersion=dispersion,
                                      log_variational=log_variational, reconstruction_loss=reconstruction_loss)
@@ -61,8 +62,9 @@ class SCANVI(VAE):
         self.n_labels = n_labels
         self.n_latent_layers = 2
         # Classifier takes n_latent as input
-
-        self.classifier = Classifier(n_latent, n_hidden, self.n_labels, n_layers, dropout_rate)
+        cls_parameters = {"n_layers": n_layers, "n_hidden": n_hidden, "dropout_rate": dropout_rate}
+        cls_parameters.update(classifier_parameters)
+        self.classifier = Classifier(n_latent, n_labels=self.n_labels, **cls_parameters)
 
         self.encoder_z2_z1 = Encoder(n_latent, n_latent, n_cat_list=[self.n_labels], n_layers=n_layers,
                                      n_hidden=n_hidden, dropout_rate=dropout_rate)
@@ -84,8 +86,12 @@ class SCANVI(VAE):
                 torch.tensor((self.labels_groups == i).astype(np.uint8), dtype=torch.uint8), requires_grad=False
             ) for i in range(self.n_groups)])
 
+    def train(self, mode=True):
+        super(SCANVI,self).train(mode=mode)
+        self.classifier.train(mode=mode, batch_norm=True)
+
     def classify(self, x):
-        z = self.sample_from_posterior_z(x)
+        z, _, _ = self.z_encoder(torch.log(1 + x))  # not using the sampled version, here z = qz_m
         if self.use_labels_groups:
             w_g = self.classifier_groups(z)
             unw_y = self.classifier(z)

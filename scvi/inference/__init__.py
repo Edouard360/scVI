@@ -23,5 +23,4 @@ __all__ = ['UnsupervisedTrainer',
            'JointSemiSupervisedTrainer',
            'SemiSupervisedTrainer',
            'AlternateSemiSupervisedTrainer',
-           'ClassifierTrainer'
-           ]
+           'ClassifierTrainer']

@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal, kl_divergence as kl
-
+#from scvi.models.utils import Module
 from scvi.models.log_likelihood import log_zinb_positive, log_nb_positive
 from scvi.models.modules import Encoder, DecoderSCVI
 from scvi.models.utils import one_hot
@@ -80,18 +80,14 @@ class VAE(nn.Module):
     def get_latents(self, x, y=None):
         return [self.sample_from_posterior_z(x, y)]
 
-    def sample_from_posterior_z(self, x, y=None):
+    def sample_from_posterior_z(self, x, y=None, n_samples=1):
         x = torch.log(1 + x)
         qz_m, qz_v, z = self.z_encoder(x, y)  # y only used in VAEC
-        if not self.training:
-            z = qz_m
         return z
 
     def sample_from_posterior_l(self, x):
         x = torch.log(1 + x)
         ql_m, ql_v, library = self.l_encoder(x)
-        if not self.training:
-            library = ql_m
         return library
 
     def get_sample_scale(self, x, batch_index=None, y=None, n_samples=1):

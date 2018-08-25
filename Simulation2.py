@@ -1,31 +1,16 @@
 use_cuda = True
-from rpy2.robjects.conversion import ri2py, py2ri
-import rpy2.robjects.numpy2ri as numpy2ri
-
 import numpy as np
+import rpy2.robjects.numpy2ri as numpy2ri
+from rpy2.robjects.conversion import ri2py
 from scipy.sparse import csr_matrix
 
 from scvi.dataset.dataset import GeneExpressionDataset
-
-from scvi.models.vae import VAE
-from scvi.models.scanvi import SCANVI
-
-from scvi.inference.variational_inference import VariationalInference
-from scvi.inference.variational_inference import SemiSupervisedVariationalInference
-from scvi.metrics.clustering import get_latent
-from scvi.metrics.classification import compute_accuracy
-
-import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE
-import seaborn as sns
-
 from scvi.harmonization.benchmark import knn_purity_avg
-from scvi.metrics.clustering import select_indices_evenly,entropy_batch_mixing
+from scvi.inference import *
+from scvi.models.scanvi import SCANVI
+from scvi.models.vae import VAE
 
-
-
-import sys
-model_type = str(sys.argv[1])
+model_type = 'svaec'  # str(sys.argv[1])
 plotname = 'EVFbatch_simulation'
 
 countUMI = np.load('../sim_data/count.UMI.npy').T
@@ -43,7 +28,6 @@ nonUMI = GeneExpressionDataset(
                 csr_matrix(countnonUMI), labels=labelnonUMI),
             gene_names=['gene'+str(i) for i in range(2000)], cell_types=['type'+str(i+1) for i in range(5)])
 
-
 if model_type in ['vae', 'svaec', 'Seurat', 'Combat']:
     gene_dataset = GeneExpressionDataset.concat_datasets(UMI, nonUMI)
 
@@ -58,17 +42,36 @@ if model_type in ['vae', 'svaec', 'Seurat', 'Combat']:
         batch_indices = np.concatenate(batch_indices)
         keys = gene_dataset.cell_types
     elif model_type == 'svaec':
-        svaec = SCANVI(gene_dataset.nb_genes, gene_dataset.n_batches,
-                       gene_dataset.n_labels, use_labels_groups=False,
-                       n_latent=10, n_layers=2)
-        infer = SemiSupervisedVariationalInference(svaec, gene_dataset)
-        infer.train(n_epochs=50)
-        infer.accuracy('unlabelled')
-        data_loader = infer.data_loaders['unlabelled']
-        latent, batch_indices, labels = get_latent(infer.model, infer.data_loaders['unlabelled'])
-        keys = gene_dataset.cell_types
-        batch_indices = np.concatenate(batch_indices)
-        keys = gene_dataset.cell_types
+        gene_dataset.subsample_genes(1000)
+
+        n_epochs_vae = 100
+        n_epochs_scanvi = 50
+        vae = VAE(gene_dataset.nb_genes, gene_dataset.n_batches, gene_dataset.n_labels, n_latent=10, n_layers=2)
+        trainer = UnsupervisedTrainer(vae, gene_dataset, train_size=1.0)
+        trainer.train(n_epochs=n_epochs_vae)
+
+        for i in [0, 1]:
+            scanvi = SCANVI(gene_dataset.nb_genes, gene_dataset.n_batches, gene_dataset.n_labels, n_layers=2)
+            scanvi.load_state_dict(vae.state_dict(), strict=False)
+            trainer_scanvi = SemiSupervisedTrainer(scanvi, gene_dataset, classification_ratio=1,
+                                                   n_epochs_classifier=1, lr_classification=5 * 1e-3)
+
+            trainer_scanvi.labelled_set = trainer_scanvi.create_posterior(indices=(gene_dataset.batch_indices == i))
+            trainer_scanvi.unlabelled_set = trainer_scanvi.create_posterior(
+                indices=(gene_dataset.batch_indices == 1 - i)
+            )
+
+            trainer_scanvi.model.eval()
+            print('NN: ', trainer_scanvi.nn_latentspace())
+            trainer_scanvi.unlabelled_set.to_monitor = ['accuracy']
+            trainer_scanvi.labelled_set.to_monitor = ['accuracy']
+            trainer_scanvi.full_dataset.to_monitor = ['entropy_batch_mixing']
+            trainer_scanvi.train(n_epochs=n_epochs_scanvi)
+
+            if i == 0:
+                print("Score UMI->nonUMI:", trainer_scanvi.unlabelled_set.accuracy())
+            else:
+                print("Score nonUMI->UMI:", trainer_scanvi.unlabelled_set.accuracy())
     elif model_type == 'Seurat':
         from scvi.harmonization.clustering.seurat import SEURAT
         SEURAT = SEURAT()
@@ -136,6 +139,7 @@ if model_type in ['vae', 'svaec', 'Seurat', 'Combat']:
     plt.savefig('../' + plotname + '.' + model_type + '.batch.png')
 else:
     from scvi.harmonization import SCMAP
+
     scmap = SCMAP()
     with open('Simulation2-scmap.txt', 'w') as file:
         print("Starting scmap")

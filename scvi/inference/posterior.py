@@ -4,6 +4,7 @@ from collections import namedtuple
 import numpy as np
 import pandas as pd
 import scipy
+import seaborn as sns
 import torch
 from matplotlib import pyplot as plt
 from scipy.stats import kde, entropy, itemfreq
@@ -19,13 +20,13 @@ from sklearn.utils.linear_assignment_ import linear_assignment
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SequentialSampler, SubsetRandomSampler, RandomSampler
 
+from scvi.dataset import CortexDataset
+from scvi.dataset.BICCN import macosko_regev_dictionary
 from scvi.models.log_likelihood import compute_log_likelihood, compute_marginal_log_likelihood
 
-from scvi.dataset.BICCN import macosko_regev_dictionary
-import seaborn as sns
 plt.switch_backend('agg')
-
 colors_20 = sns.color_palette('tab20', 20)
+
 
 class SequentialSubsetSampler(SubsetRandomSampler):
     def __iter__(self):
@@ -145,7 +146,7 @@ class Posterior:
         labels = []
         for tensors in self:
             sample_batch, local_l_mean, local_l_var, batch_index, label = tensors
-            latent += [self.model.sample_from_posterior_z(sample_batch, y=label)]
+            latent += [self.model.z_encoder(torch.log(1 + sample_batch))[0]]
             batch_indices += [batch_index]
             labels += [label]
         return np.array(torch.cat(latent)), np.array(torch.cat(batch_indices)), np.array(torch.cat(labels)).ravel()
@@ -436,6 +437,7 @@ def entropy_from_indices(indices):
 
 def entropy_batch_mixing(latent_space, batches, n_neighbors=50, n_pools=50, n_samples_per_pool=100, max_number=500):
     # max number is an important parameter
+    np.random.seed(0)
     n_samples = len(latent_space)
     keep_idx = np.random.choice(np.arange(n_samples), size=min(len(latent_space), max_number), replace=False)
     latent_space, batches = latent_space[keep_idx], batches[keep_idx]
@@ -634,7 +636,7 @@ def compute_predictions(model, data_loader, classifier=None):
         elif classifier is not None:
             # Then we use the specified classifier
             if model is not None:
-                sample_batch, _, _ = model.z_encoder(sample_batch)
+                sample_batch, _, _ = model.z_encoder(torch.log(1 + sample_batch))
             y_pred = classifier(sample_batch).argmax(dim=-1)
         else:  # The model is the raw classifier
             y_pred = model(sample_batch).argmax(dim=-1)
@@ -674,6 +676,7 @@ def proximity_imputation(real_latent1, normed_gene_exp_1, real_latent2, k=4):
     knn = KNeighborsRegressor(k, weights='distance')
     y = knn.fit(real_latent1, normed_gene_exp_1).predict(real_latent2)
     return y
+
 
 color_dictionary = dict()
 color_dictionary.update(macosko_regev_dictionary)

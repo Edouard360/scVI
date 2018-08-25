@@ -52,7 +52,7 @@ class Trainer:
 
         self.weight_decay = weight_decay
         self.benchmark = benchmark
-        self.epoch = 0
+        self.epoch = -1
         self.training_time = 0
 
         if metrics_to_monitor is not None:
@@ -74,11 +74,11 @@ class Trainer:
     def compute_metrics(self):
         begin = time.time()
         with torch.set_grad_enabled(False):
+            epoch = self.epoch+1
             self.model.eval()
-            if self.frequency and (
-                            self.epoch == 0 or self.epoch == self.n_epochs or (self.epoch % self.frequency == 0)):
+            if self.frequency and (epoch == -1 or epoch == self.n_epochs or (epoch % self.frequency == 0)):
                 if self.verbose:
-                    print("\nEPOCH [%d/%d]: " % (self.epoch, self.n_epochs))
+                    print("\nEPOCH [%d/%d]: " % (epoch, self.n_epochs))
 
                 for name, posterior in self._posteriors.items():
                     print_name = ' '.join([s.capitalize() for s in name.split('_')[-2:]])
@@ -99,7 +99,8 @@ class Trainer:
             if params is None:
                 params = filter(lambda p: p.requires_grad, self.model.parameters())
 
-            optimizer = torch.optim.Adam(params, lr=lr, weight_decay=self.weight_decay)
+            if getattr(self,'optimizer') is None:
+                self.optimizer = torch.optim.Adam(params, lr=lr, weight_decay=self.weight_decay)
             self.compute_metrics_time = 0
             self.n_epochs = n_epochs
             self.compute_metrics()
@@ -112,9 +113,9 @@ class Trainer:
                     pbar.update(1)
                     for tensors_list in self.data_loaders_loop():
                         loss = self.loss(*tensors_list)
-                        optimizer.zero_grad()
+                        self.optimizer.zero_grad()
                         loss.backward()
-                        optimizer.step()
+                        self.optimizer.step()
 
                     if not self.on_epoch_end():
                         break
@@ -183,11 +184,14 @@ class Trainer:
             object.__delattr__(self, name)
 
     def __setattr__(self, name, value):
-        if isinstance(value, Posterior):
-            name = name.strip('_')
-            self.register_posterior(name, value)
-        else:
-            object.__setattr__(self, name, value)
+        try:
+            getattr(type(self), name).__set__(self, value)
+        except AttributeError:
+            if isinstance(value, Posterior):
+                name = name.strip('_')
+                self.register_posterior(name, value)
+            else:
+                object.__setattr__(self, name, value)
 
     def train_test(self, model=None, gene_dataset=None, train_size=0.1, test_size=None, seed=0):
         """
