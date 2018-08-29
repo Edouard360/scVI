@@ -5,12 +5,12 @@ from .synthetic import SyntheticDataset, SyntheticRandomDataset
 from .cite_seq import CiteSeqDataset, CbmcDataset
 from .pbmc import PbmcDataset, PurifiedPBMCDataset
 from .hemato import HematoDataset
-from .loom import LoomDataset, RetinaDataset
+#from .loom import LoomDataset, RetinaDataset
 from .dataset10X import Dataset10X, BrainSmallDataset
-from .anndata import AnnDataset
+#from .anndata import AnnDataset
 from .csv import CsvDataset, BreastCancerDataset, MouseOBDataset
 from .seqfish import SeqfishDataset
-from .smfish import SmfishDataset
+#from .smfish import SmfishDataset
 
 __all__ = ['SyntheticDataset',
            'SyntheticRandomDataset',
@@ -23,12 +23,12 @@ __all__ = ['SyntheticDataset',
            'HematoDataset',
            'CbmcDataset',
            'PbmcDataset',
-           'LoomDataset',
-           'AnnDataset',
+           #'LoomDataset',
+           #'AnnDataset',
            'CsvDataset',
            'Dataset10X',
            'SeqfishDataset',
-           'SmfishDataset',
+           #'SmfishDataset',
            'BreastCancerDataset',
            'MouseOBDataset',
            'PurifiedPBMCDataset']

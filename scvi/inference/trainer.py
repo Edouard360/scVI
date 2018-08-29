@@ -15,6 +15,16 @@ from scvi.inference.posterior import Posterior
 torch.set_grad_enabled(False)
 
 
+import copy
+
+import matplotlib.pyplot as plt
+import torch
+from torch.nn import functional as F
+
+
+plt.switch_backend('agg')
+
+
 class Trainer:
     r"""The abstract Trainer class for training a PyTorch model and monitoring its statistics. It should be
     inherited at least with a .loss() function to be optimized in the training loop.
@@ -60,8 +70,6 @@ class Trainer:
         else:
             self.metrics_to_monitor = self.default_metrics_to_monitor
 
-        self.early_stopping = EarlyStopping(**early_stopping_kwargs)
-
         self.use_cuda = use_cuda and torch.cuda.is_available()
         if self.use_cuda:
             self.model.cuda()
@@ -74,23 +82,24 @@ class Trainer:
 
     def compute_metrics(self):
         begin = time.time()
-        with torch.set_grad_enabled(False):
-            self.model.eval()
-            if self.frequency and (
-                            self.epoch == 0 or self.epoch == self.n_epochs or (self.epoch % self.frequency == 0)):
-                if self.verbose:
-                    print("\nEPOCH [%d/%d]: " % (self.epoch, self.n_epochs))
+        # with torch.set_grad_enabled(False):
 
-                for name, posterior in self._posteriors.items():
-                    print_name = ' '.join([s.capitalize() for s in name.split('_')[-2:]])
-                    if hasattr(posterior, 'to_monitor'):
-                        for metric in posterior.to_monitor:
-                            if self.verbose:
-                                print(print_name, end=' : ')
-                            result = getattr(posterior, metric)(verbose=self.verbose)
-                            self.history[metric + '_' + name] += [result]
-            self.model.train()
-            self.compute_metrics_time += time.time() - begin
+            # if self.frequency and (
+            #                 self.epoch == 0 or self.epoch == self.n_epochs or (self.epoch % self.frequency == 0)):
+            #     self.model.eval()
+            #     if self.verbose:
+            #         print("\nEPOCH [%d/%d]: " % (self.epoch, self.n_epochs))
+            #
+            #     for name, posterior in self._posteriors.items():
+            #         print_name = ' '.join([s.capitalize() for s in name.split('_')[-2:]])
+            #         if hasattr(posterior, 'to_monitor'):
+            #             for metric in posterior.to_monitor:
+            #                 if self.verbose:
+            #                     print(print_name, end=' : ')
+            #                 result = getattr(posterior, metric)(verbose=self.verbose)
+            #                 self.history[metric + '_' + name] += [result]
+            #     self.model.train()
+            #     self.compute_metrics_time += time.time() - begin
 
     def train(self, n_epochs=20, lr=1e-3, eps=0.01, params=None):
         begin = time.time()
@@ -100,7 +109,8 @@ class Trainer:
             if params is None:
                 params = filter(lambda p: p.requires_grad, self.model.parameters())
 
-            optimizer = torch.optim.Adam(params, lr=lr, eps=eps) #weight_decay=self.weight_decay,
+            # SGD
+            optimizer = torch.optim.Adam(params, lr=lr, eps=eps)#torch.optim.Adam(params, lr=lr, eps=eps) #weight_decay=self.weight_decay,
             self.compute_metrics_time = 0
             self.n_epochs = n_epochs
             self.compute_metrics()
@@ -110,11 +120,29 @@ class Trainer:
                 # See https://stackoverflow.com/questions/42212810/tqdm-in-jupyter-notebook
                 for self.epoch in pbar:
                     self.on_epoch_begin()
+                    print(self.epoch)
                     pbar.update(1)
                     for tensors_list in self.data_loaders_loop():
+
+                        #print('\n\n')
+                        #print(tensors_list[0][0])
                         loss = self.loss(*tensors_list)
+                        #print(loss)
                         optimizer.zero_grad()
                         loss.backward()
+                        # weight_dropout = self.model.decoder.px_dropout_decoder.weight
+                        # bias_dropout = self.model.decoder.px_dropout_decoder.bias
+                        # print(weight_dropout.data.t().size())
+                        # print(weight_dropout.grad.t())
+                        # print(weight_dropout.data.t())
+                        #
+                        #
+                        # print(bias_dropout.data.size())
+                        # print(bias_dropout.grad)
+                        # print(bias_dropout.data)
+
+                        # print(self.model.z_encoder.encoder.fc_layers[0].weight.data)
+                        # print(self.model.z_encoder.encoder.fc_layers[0].weight.grad)
                         optimizer.step()
 
                     if not self.on_epoch_end():
@@ -134,20 +162,7 @@ class Trainer:
 
     def on_epoch_end(self):
         self.compute_metrics()
-        on = self.early_stopping.on
-        early_stopping_metric = self.early_stopping.early_stopping_metric
-        save_best_state_metric = self.early_stopping.save_best_state_metric
-        if self.save_best_state_metric is not None and on is not None:
-            if self.early_stopping.update_state(self.history[save_best_state_metric + '_' + on][-1]):
-                self.best_state_dict = self.model.state_dict()
-                self.best_epoch = self.epoch
-
-        continue_training = True
-        if self.early_stopping_metric is not None and on is not None:
-            continue_training = self.early_stopping.update(
-                self.history[early_stopping_metric + '_' + on][-1]
-            )
-        return continue_training
+        return True
 
     @property
     @abstractmethod
@@ -155,7 +170,7 @@ class Trainer:
         pass
 
     def data_loaders_loop(self):  # returns an zipped iterable corresponding to loss signature
-        data_loaders_loop = [self._posteriors[name] for name in self.posteriors_loop]
+        data_loaders_loop = [self._posteriors[name] for name in self.posteriors_loop] #.train()
         return zip(data_loaders_loop[0], *[cycle(data_loader) for data_loader in data_loaders_loop[1:]])
 
     def register_posterior(self, name, value):
@@ -225,68 +240,44 @@ class SequentialSubsetSampler(SubsetRandomSampler):
         return iter(self.indices)
 
 
-class EarlyStopping:
-    def __init__(self, early_stopping_metric='ll', save_best_state_metric=None, on='test_set',
-                 patience=15, threshold=3, benchmark=False):
-        self.benchmark = benchmark
-        self.patience = patience
-        self.threshold = threshold
-        self.epoch = 0
-        self.wait = 0
-        self.mode = getattr(Posterior, early_stopping_metric).mode if early_stopping_metric is not None else None
-        # We set the best to + inf because we're dealing with a loss we want to minimize
-        self.current_performance = np.inf
-        self.best_performance = np.inf
-        self.best_performance_state = np.inf
-        # If we want to maximize, we start at - inf
-        if self.mode == "max":
-            self.best_performance *= -1
-            self.current_performance *= -1
-        self.mode_save_state = getattr(Posterior,
-                                       save_best_state_metric).mode if save_best_state_metric is not None else None
-        if self.mode_save_state == "max":
-            self.best_performance_state *= -1
+class UnsupervisedTrainer(Trainer):
+    r"""The VariationalInference class for the unsupervised training of an autoencoder.
 
-        self.early_stopping_metric = early_stopping_metric
-        self.save_best_state_metric = save_best_state_metric
-        self.on = on
+    Args:
+        :model: A model instance from class ``VAE``, ``VAEC``, ``SCANVI``
+        :gene_dataset: A gene_dataset instance like ``CortexDataset()``
+        :train_size: The train size, either a float between 0 and 1 or and integer for the number of training samples
+         to use Default: ``0.8``.
+        :\*\*kwargs: Other keywords arguments from the general Trainer class.
 
-    def update(self, scalar):
-        self.epoch += 1
-        if self.benchmark or self.epoch < self.patience:
-            continue_training = True
-        elif self.wait >= self.patience:
-            continue_training = False
-        else:
-            # Shift
-            self.current_performance = scalar
+    Examples:
+        >>> gene_dataset = CortexDataset()
+        >>> vae = VAE(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches * False,
+        ... n_labels=gene_dataset.n_labels)
 
-            # Compute improvement
-            if self.mode == "max":
-                improvement = self.current_performance - self.best_performance
-            elif self.mode == "min":
-                improvement = self.best_performance - self.current_performance
+        >>> infer = VariationalInference(gene_dataset, vae, train_size=0.5)
+        >>> infer.train(n_epochs=20, lr=1e-3)
+    """
+    default_metrics_to_monitor = ['ll']
 
-            # updating best performance
-            if improvement > 0:
-                self.best_performance = self.current_performance
+    def __init__(self, model, gene_dataset, train_size=0.8, test_size=None, kl=None, **kwargs):
+        super(UnsupervisedTrainer, self).__init__(model, gene_dataset, **kwargs)
+        self.kl = kl
+        if type(self) is UnsupervisedTrainer:
+            self.train_set, self.test_set = self.train_test(model, gene_dataset, train_size, test_size)
+            self.train_set.to_monitor = ['ll']
+            self.test_set.to_monitor = ['ll']
 
-            if improvement < self.threshold:
-                self.wait += 1
-            else:
-                self.wait = 0
+    @property
+    def posteriors_loop(self):
+        return ['train_set']
 
-            continue_training = True
-        if not continue_training:
-            print("\nStopping early: no improvement of more than " + str(self.threshold) +
-                  " nats in " + str(self.patience) + " epochs")
-            print("If the early stopping criterion is too strong, "
-                  "please instantiate it with different parameters in the train method.")
-        return continue_training
+    def loss(self, tensors):
+        sample_batch, local_l_mean, local_l_var, _, _ = tensors
+        reconst_loss, kl_divergence = self.model(sample_batch, local_l_mean, local_l_var)
+        loss = torch.mean(reconst_loss + self.kl_weight * kl_divergence)
+        return loss
 
-    def update_state(self, scalar):
-        improved = ((self.mode_save_state == "max" and scalar - self.best_performance_state > 0) or
-                    (self.mode_save_state == "min" and self.best_performance_state - scalar > 0))
-        if improved:
-            self.best_performance_state = scalar
-        return improved
+    def on_epoch_begin(self):
+        self.kl_weight = self.kl if self.kl is not None else min(1, self.epoch / 400)#self.n_epochs)
+

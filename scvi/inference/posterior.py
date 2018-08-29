@@ -8,69 +8,42 @@ import torch
 from matplotlib import pyplot as plt
 from scipy.stats import kde, entropy, itemfreq
 from sklearn import neighbors
-from sklearn.cluster import KMeans
 from sklearn.manifold import TSNE
-from sklearn.metrics import adjusted_rand_score as ARI
-from sklearn.metrics import normalized_mutual_info_score as NMI
-from sklearn.metrics import silhouette_score
-from sklearn.mixture import GaussianMixture as GMM
 from sklearn.neighbors import NearestNeighbors, KNeighborsRegressor
 from sklearn.utils.linear_assignment_ import linear_assignment
-from torch.distributions import Gamma, Poisson, Normal
+from torch.distributions import Normal, kl_divergence as kl
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SequentialSampler, SubsetRandomSampler, RandomSampler
-from torch.distributions import Normal, kl_divergence as kl
-
-from scvi.models.log_likelihood import compute_log_likelihood, compute_marginal_log_likelihood
+from scvi.models.vae import log_zinb_positive
+from scvi.models.vae import compute_log_likelihood
 
 
 class SequentialSubsetSampler(SubsetRandomSampler):
     def __iter__(self):
         return iter(self.indices)
 
+# class DataLoaderIter:
+#     def __init__(self, dataset):
+#         batch_size = 128
+#         self.dataset = dataset
+#         iterep = int((len(self.dataset) - 1) / float(batch_size)) + 1
+#         self.index_train_list = iter([np.random.choice(np.arange(len(self.dataset)), size=batch_size)
+#                                       for t in range(iterep)])
+#
+#     def __next__(self):
+#         return self.dataset.collate_fn(next(self.index_train_list))
+#
+#     def __iter__(self):
+#         return self
+#
+#
+# class MyDataLoader(DataLoader):
+#     def __iter__(self):
+#         return DataLoaderIter(self.dataset)
+
 
 class Posterior:
-    r"""The functional data unit. A `Posterior` instance is instanciated with a model and a gene_dataset, and
-    as well as additional arguments that for Pytorch's `DataLoader`. A subset of indices can be specified, for
-    purpose such as splitting the data into train/test or labelled/unlabelled (for semi-supervised learning).
-    Each trainer instance of the `Trainer` class can therefore have multiple `Posterior` instances to train a model.
-    A `Posterior` instance also comes with many methods or utilities for its corresponding data.
-
-
-    :param model: Number of input genes
-    :param gene_dataset: Number of batches
-    :param shuffle: Number of labels
-    :param indices: Number of nodes per hidden layer
-    :param use_cuda: Dimensionality of the latent space
-    :param data_loader_kwargs: Number of hidden layers used for encoder and decoder NNs
-
-    Examples:
-
-    Let's instanciate a `trainer`, with a gene_dataset and a model
-
-        >>> gene_dataset = CortexDataset()
-        >>> vae = VAE(gene_dataset.nb_genes, n_batch=gene_dataset.n_batches * False,
-        ... n_labels=gene_dataset.n_labels, use_cuda=True)
-        >>> trainer = UnsupervisedTrainer(vae, gene_dataset)
-        >>> trainer.train(n_epochs=50)
-
-    A `UnsupervisedTrainer` instance has two `Posterior` attributes: `train_set` and `test_set`
-    For this subset of the original gene_dataset instance, we can examine the differential expression,
-    log_likelihood, entropy batch mixing, ... or display the TSNE of the data in the latent space through the
-    scVI model
-
-        >>> trainer.train_set.differential_expression_stats()
-        >>> trainer.train_set.ll()
-        >>> trainer.train_set.entropy_batch_mixing()
-        >>> trainer.train_set.show_t_sne(n_samples=1000, color_by='labels')
-
-    """
-
     def __init__(self, model, gene_dataset, shuffle=False, indices=None, use_cuda=True, data_loader_kwargs=dict()):
-        '''
-
-        When added to annotation, has a private name attribute
-        '''
         self.model = model
         self.gene_dataset = gene_dataset
         self.to_monitor = []
@@ -93,6 +66,9 @@ class Posterior:
         self.data_loader_kwargs.update({'sampler': sampler})
         self.data_loader = DataLoader(gene_dataset, **self.data_loader_kwargs)
 
+    # def train(self):
+    #     return self.update(dict(), data_loader_type=MyDataLoader)
+
     @property
     def indices(self):
         if hasattr(self.data_loader.sampler, 'indices'):
@@ -104,16 +80,13 @@ class Posterior:
         return map(self.to_cuda, iter(self.data_loader))
 
     def to_cuda(self, tensors):
-        #x, l_m, l_v, b, l = tensors
-        #x, l_m, l_v = x.type(torch.double),l_m.type(torch.double), l_v.type(torch.double)
-        #return x, l_m, l_v, b, l#
         return [t.cuda(async=self.use_cuda) if self.use_cuda else t for t in tensors]
 
-    def update(self, data_loader_kwargs):
+    def update(self, data_loader_kwargs, data_loader_type=DataLoader):
         posterior = copy.copy(self)
         posterior.data_loader_kwargs = copy.copy(self.data_loader_kwargs)
         posterior.data_loader_kwargs.update(data_loader_kwargs)
-        posterior.data_loader = DataLoader(self.gene_dataset, **posterior.data_loader_kwargs)
+        posterior.data_loader = data_loader_type(self.gene_dataset, **posterior.data_loader_kwargs)
         return posterior
 
     def sequential(self, batch_size=128):
@@ -132,12 +105,6 @@ class Posterior:
         return ll
 
     ll.mode = 'min'
-
-    def marginal_ll(self, verbose=False, n_mc_samples=1000):
-        ll = compute_marginal_log_likelihood(self.model, self, n_mc_samples)
-        if verbose:
-            print("True LL : %.4f" % ll)
-        return ll
 
     def get_latent(self):
         latent = []
@@ -227,25 +194,10 @@ class Posterior:
             writer.close()
         return genes, expression
 
-    def imputation(self, n_samples=1):
-        imputed_list = []
-        for tensors in self:
-            sample_batch, _, _, batch_index, labels = tensors
-            px_rate = self.model.get_sample_rate(sample_batch, batch_index=batch_index, y=labels, n_samples=n_samples)
-            imputed_list += [np.array(px_rate.cpu())]
-        imputed_list = np.concatenate(imputed_list, axis=1)
-        return imputed_list.squeeze()
-
-    def generate(self, n_samples=100, genes=None): # with n_samples>1 return original list/ otherwose sequential
-        '''
-        Return original_values as y and generated as x (for posterior density visualization)
-        :param n_samples:
-        :param genes:
-        :return:
-        '''
+    def generate(self, n_samples=100, genes=None):  # with n_samples>1 return original list/ otherwose sequential
         original_list = []
         posterior_list = []
-        batch_size = 128#max(self.data_loader_kwargs['batch_size'] // n_samples, 2)  # Reduce batch_size on GPU
+        batch_size = 128  # max(self.data_loader_kwargs['batch_size'] // n_samples, 2)  # Reduce batch_size on GPU
         for tensors in self.update({"batch_size": batch_size}):
             sample_batch, _, _, batch_index, labels = tensors
             px_dispersion, px_rate = self.model.inference(sample_batch, batch_index=batch_index, y=labels,
@@ -256,51 +208,51 @@ class Posterior:
             #
             l_train = np.random.gamma(r, p / (1 - p))
             X = np.random.poisson(l_train)
-            #'''
+            # '''
             # In numpy (shape, scale) => (concentration, rate), with scale = p /(1 - p)
             # rate = (1 - p) / p  # = 1/scale # used in pytorch
             # l_train = Gamma(r, rate).sample()  # assert Gamma(r, rate).mean = px_rate
             # posterior = Poisson(l_train).sample()
-            #'''
+            # '''
             original_list += [np.array(sample_batch.cpu())]
-            posterior_list += [X]#[np.array(posterior.cpu())]##
+            posterior_list += [X]  # [np.array(posterior.cpu())]##
 
             if genes is not None:
                 posterior_list[-1] = posterior_list[-1][:, :, self.gene_dataset._gene_idx(genes)]
                 original_list[-1] = original_list[-1][:, self.gene_dataset._gene_idx(genes)]
 
-            posterior_list[-1] = np.transpose(posterior_list[-1], (1,2,0))
+            posterior_list[-1] = np.transpose(posterior_list[-1], (1, 2, 0))
 
         return np.concatenate(posterior_list, axis=0), np.concatenate(original_list, axis=0)
 
     def generate_parameters(self):
         dropout_list = []
         mean_list = []
-        dispersion_list=[]
+        dispersion_list = []
         for tensors in self.sequential(1000):
             sample_batch, _, _, batch_index, labels = tensors
-            px_dispersion, px_rate, px_dropout = self.model.inference(sample_batch, batch_index=batch_index, y=labels,
-                                                          n_samples=1)[:3]
+            px_dispersion, px_rate, px_dropout = self.model.inference(sample_batch)[:3]
 
-
-
-            dispersion_list+=[np.repeat(np.array(px_dispersion.cpu())[np.newaxis,:], px_rate.size(0), axis=0)]
+            dispersion_list += [np.repeat(np.array(px_dispersion.cpu())[np.newaxis, :], px_rate.size(0), axis=0)]
             mean_list += [np.array(px_rate.cpu())]
             dropout_list += [np.array(px_dropout.cpu())]
 
-        return np.concatenate(dropout_list), np.concatenate(mean_list),np.concatenate(dispersion_list)
+        return np.concatenate(dropout_list), np.concatenate(mean_list), np.concatenate(dispersion_list)
+
 
     def get_stats(self, verbose=True):
-        kl_divergence_l_list=[]
+        kl_divergence_l_list = []
         kl_divergence_z_list = []
         reconst_losses = []
         qz_v_list = []
         for tensors in self:
-            x,local_l_mean, local_l_var,batch_index,y = tensors
-            px_r, px_rate, px_dropout, qz_m, qz_v, z, ql_m, ql_v, library = self.model.inference(x, batch_index, y)
-            qz_v_list+=[qz_v]
-            reconst_losses += [np.array(self.model._reconstruction_loss(x, px_rate, px_r, px_dropout).cpu())]
-            #print(reconst_losses[-1].shape)
+            x, local_l_mean, local_l_var, batch_index, y = tensors
+            px_r, px_rate, px_dropout, px_scale, qz_m, qz_v, z, ql_m, ql_v, library = self.model.inference(x)
+            qz_v_list += [qz_v]
+
+
+            reconst_losses += [np.array((-log_zinb_positive(x, px_rate, px_r, px_dropout)).cpu())]
+            # print(reconst_losses[-1].shape)
             # KL Divergence
             mean = torch.zeros_like(qz_m)
             scale = torch.ones_like(qz_v)
@@ -311,162 +263,33 @@ class Posterior:
             kl_divergence_z_list += [np.array(kl_divergence_z.cpu())]
             kl_divergence_l_list += [np.array(kl_divergence_l.cpu())]
 
-        #print(len())
+        # print(len())
         reconst_losses = np.concatenate(reconst_losses)
         kl_divergence_z_list = np.concatenate(kl_divergence_z_list)
         kl_divergence_l_list = np.concatenate(kl_divergence_l_list)
         qz_v_list = np.concatenate(qz_v_list)
 
-        print({'recons': np.mean(reconst_losses), 'mean_kl_z': np.mean(kl_divergence_z_list),'max_kl_z': np.max(kl_divergence_z_list),
-         'mean_kl_l': np.mean(kl_divergence_l_list), 'mean_qz_v': np.mean(qz_v_list),'min_qz_v': np.min(qz_v_list)})
+        print({'recons': np.mean(reconst_losses), 'mean_kl_z': np.mean(kl_divergence_z_list),
+               'max_kl_z': np.max(kl_divergence_z_list),
+               'mean_kl_l': np.mean(kl_divergence_l_list), 'mean_qz_v': np.mean(qz_v_list),
+               'min_qz_v': np.min(qz_v_list)})
         return None
 
+    def get_library(self, verbose=True):
+        library_list = []
+        for tensors in self:
+            x = tensors[0]
+            library_list += [np.array(self.model.inference(x)[-1].cpu())]
+        library_list = np.concatenate(library_list)
+        return library_list
 
     def get_sample_scale(self):
-        px_scales=[]
+        px_scales = []
         for tensors in self:
             sample_batch, _, _, batch_index, labels = tensors
             px_scales += [
-                np.array((self.model.get_sample_scale(
-                    sample_batch, batch_index=batch_index, y=labels, n_samples=1)
-                         ).cpu())]
+                np.array((self.model.get_sample_scale(sample_batch)).cpu())]
         return np.concatenate(px_scales)
-
-    def imputation_list(self, n_samples=1):
-        original_list = []
-        imputed_list = []
-        batch_size = 10000  # self.data_loader_kwargs['batch_size'] // n_samples
-        for tensors, corrupted_tensors in zip(self.uncorrupted().sequential(batch_size=batch_size),
-                                              self.corrupted().sequential(batch_size=batch_size)):
-            batch = tensors[0]
-            actual_batch_size = batch.size(0)
-            dropout_batch, _, _, batch_index, labels = corrupted_tensors
-            px_rate = self.model.get_sample_rate(dropout_batch, batch_index=batch_index, y=labels, n_samples=n_samples)
-
-            indices_dropout = torch.nonzero(batch - dropout_batch)
-            i = indices_dropout[:, 0]
-            j = indices_dropout[:, 1]
-
-            batch = batch.unsqueeze(0).expand((n_samples, batch.size(0), batch.size(1)))
-            original = np.array(batch[:, i, j].view(-1).cpu())
-            imputed = np.array(px_rate[i, j].view(-1).cpu())
-
-            cells_index = np.tile(np.array(i.cpu()), n_samples)
-
-            original_list += [original[cells_index == i] for i in range(actual_batch_size)]
-            imputed_list += [imputed[cells_index == i] for i in range(actual_batch_size)]
-        return original_list, imputed_list
-
-    def imputation_score(self, verbose=False, original_list=None, imputed_list=None, n_samples=1):
-        if original_list is None or imputed_list is None:
-            original_list, imputed_list = self.imputation_list(n_samples=n_samples)
-        return np.median(np.abs(np.concatenate(original_list) - np.concatenate(imputed_list)))
-
-    def imputation_benchmark(self, n_samples=8, verbose=False):
-        original_list, imputed_list = self.imputation_list(n_samples=n_samples)
-        # Median of medians for all distances
-        median_score = self.imputation_score(original_list=original_list, imputed_list=imputed_list)
-
-        # Mean of medians for each cell
-        imputation_cells = []
-        for original, imputed in zip(original_list, imputed_list):
-            has_imputation = len(original) and len(imputed)
-            imputation_cells += [np.median(np.abs(original - imputed)) if has_imputation else 0]
-        mean_score = np.mean(imputation_cells)
-
-        if verbose:
-            print("\nMedian of Median: %.4f\nMean of Median for each cell: %.4f" % (median_score, mean_score))
-
-        plot_imputation(np.concatenate(original_list), np.concatenate(imputed_list))
-        return original_list, imputed_list
-
-    def knn_purity(self, verbose=False):
-        latent, _, labels = self.get_latent()
-        score = knn_purity(latent, labels)
-        if verbose:
-            print("KNN purity score :", score)
-        return score
-
-    knn_purity.mode = 'max'
-
-    def clustering_scores(self, verbose=True, prediction_algorithm='knn'):
-        if self.gene_dataset.n_labels > 1:
-            latent, _, labels = self.get_latent()
-            if prediction_algorithm == 'knn':
-                labels_pred = KMeans(self.gene_dataset.n_labels, n_init=200).fit_predict(latent)  # n_jobs>1 ?
-            elif prediction_algorithm == 'gmm':
-                gmm = GMM(self.gene_dataset.n_labels)
-                gmm.fit(latent)
-                labels_pred = gmm.predict(latent)
-
-            asw_score = silhouette_score(latent, labels)
-            nmi_score = NMI(labels, labels_pred)
-            ari_score = ARI(labels, labels_pred)
-            uca_score = unsupervised_clustering_accuracy(labels, labels_pred)[0]
-            if verbose:
-                print("Clustering Scores:\nSilhouette: %.4f\nNMI: %.4f\nARI: %.4f\nUCA: %.4f" %
-                      (asw_score, nmi_score, ari_score, uca_score))
-            return asw_score, nmi_score, ari_score, uca_score
-
-    def nn_overlap_score(self, verbose=True, **kwargs):
-        '''
-        Quantify how much the similarity between cells in the mRNA latent space resembles their similarity at the
-        protein level. Compute the overlap fold enrichment between the protein and mRNA-based cell 100-nearest neighbor
-        graph and the Spearman correlation of the adjacency matrices.
-        '''
-        if hasattr(self.gene_dataset, 'adt_expression_clr'):
-            latent, _, _ = self.sequential().get_latent()
-            protein_data = self.gene_dataset.adt_expression_clr[self.indices]
-            spearman_correlation, fold_enrichment = nn_overlap(latent, protein_data, **kwargs)
-            if verbose:
-                print("Overlap Scores:\nSpearman Correlation: %.4f\nFold Enrichment: %.4f" %
-                      (spearman_correlation, fold_enrichment))
-            return spearman_correlation, fold_enrichment
-
-    def accuracy(self, verbose=False):
-        model, cls = (self.sampling_model, self.model) if hasattr(self, 'sampling_model') else (self.model, None)
-        acc = compute_accuracy(model, self, classifier=cls)
-        if verbose:
-            print("Acc: %.4f" % (acc))
-        return acc
-
-    accuracy.mode = 'max'
-
-    def hierarchical_accuracy(self, name, verbose=False):
-
-        all_y, all_y_pred = compute_predictions(self.model, self)
-        acc = np.mean(all_y == all_y_pred)
-
-        all_y_groups = np.array([self.model.labels_groups[y] for y in all_y])
-        all_y_pred_groups = np.array([self.model.labels_groups[y] for y in all_y_pred])
-        h_acc = np.mean(all_y_groups == all_y_pred_groups)
-
-        if verbose:
-            print("Acc for %s is : %.4f\nHierarchical Acc for %s is : %.4f\n" % (name, acc, name, h_acc))
-        return acc
-
-    accuracy.mode = 'max'
-
-    def unsupervised_accuracy(self, verbose=False):
-        uca = unsupervised_classification_accuracy(self.model, self)[0]
-        if verbose:
-            print("UCA : %.4f" % (uca))
-        return uca
-
-    unsupervised_accuracy.mode = 'max'
-
-    def ll_fish(self, verbose=False):
-        ll = compute_log_likelihood(self.model, self, mode="smFISH")
-        if verbose:
-            print("LL Fish: %.4f" % ll)
-        return ll
-
-    def show_spatial_expression(self, x_coord, y_coord, labels, color_by='scalar', title='spatial_expression.svg'):
-        x_coord = x_coord.reshape(-1, 1)
-        y_coord = y_coord.reshape(-1, 1)
-        latent = np.concatenate((x_coord, y_coord), axis=1)
-        self.show_t_sne(n_samples=1000, color_by=color_by, save_name=title, latent=latent, batch_indices=None,
-                        labels=labels)
 
     def show_t_sne(self, n_samples=1000, color_by='', save_name='', latent=None, batch_indices=None,
                    labels=None, n_batch=None):
